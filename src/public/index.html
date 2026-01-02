@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SSH 公钥管理</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <!-- 认证页面 -->
+    <div id="auth-page" class="page">
+      <div class="card">
+        <h1>🔐 SSH 公钥管理</h1>
+        
+        <!-- 登录 -->
+        <div id="login-section">
+          <h2>请输入验证码</h2>
+          <p class="hint">打开您的认证器应用，输入 6 位数字验证码</p>
+          <input type="text" id="token-input" placeholder="000000" maxlength="6" pattern="[0-9]*" inputmode="numeric">
+          <button id="verify-btn" class="btn btn-primary">验证并登录</button>
+          <div id="auth-error" class="error-message"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 管理页面 -->
+    <div id="manage-page" class="page" style="display: none;">
+      <div class="header">
+        <h1>📋 SSH 公钥管理</h1>
+        <button id="logout-btn" class="btn btn-secondary">退出登录</button>
+      </div>
+
+      <!-- 添加公钥 -->
+      <div class="card">
+        <h2>➕ 添加公钥</h2>
+        <textarea id="public-key-input" placeholder="粘贴您的 SSH 公钥（例如：ssh-rsa AAAAB3...）" rows="4"></textarea>
+        <input type="text" id="key-comment-input" placeholder="备注（可选）" maxlength="100">
+        <button id="add-key-btn" class="btn btn-primary">添加公钥</button>
+        <div id="add-error" class="error-message"></div>
+        <div id="add-success" class="success-message"></div>
+      </div>
+
+      <!-- 公钥列表 -->
+      <div class="card">
+        <h2>🔑 我的公钥列表</h2>
+        <div id="keys-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 加载 FingerprintJS -->
+  <script src="https://cdn.jsdelivr.net/npm/@fingerprintjs/fingerprintjs@3/dist/fp.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
