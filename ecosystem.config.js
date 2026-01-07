@@ -7,9 +7,9 @@ module.exports = {
     env: {
       NODE_ENV: 'production',
       // 也可以通过环境变量覆盖配置
-      HOST: '127.0.0.1',
+      HOST: '0.0.0.0',
       PORT: 3000,
-      AUTHORIZED_KEYS_PATH: '/Users/lianhaocheng/.ssh/authorized_keys',
+      AUTHORIZED_KEYS_PATH: '/path/to/.ssh/authorized_keys',
     },
 
     name: 'ssh-key-manager',
