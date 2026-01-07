@@ -43,6 +43,69 @@ function syncAuthorizedKeys() {
 }
 
 /**
+ * 根据指纹获取实际的用户ID（支持指纹映射）
+ */
+function getActualUserId(fingerprint) {
+  return new Promise((resolve, reject) => {
+    // 先尝试从指纹映射表查找
+    db.get(
+      'SELECT user_id FROM fingerprint_mapping WHERE fingerprint = ?',
+      [fingerprint],
+      (err, mapping) => {
+        if (err) return reject(err);
+        if (mapping) {
+          return resolve(mapping.user_id);
+        }
+        
+        // 如果没有映射，则从用户表查找
+        db.get(
+          'SELECT id FROM users WHERE fingerprint = ?',
+          [fingerprint],
+          (err, user) => {
+            if (err) return reject(err);
+            resolve(user ? user.id : null);
+          }
+        );
+      }
+    );
+  });
+}
+
+/**
+ * 合并指纹（将新指纹映射到已有用户）
+ */
+function mergeFingerprints(existingUserId, newFingerprint) {
+  return new Promise((resolve, reject) => {
+    // 插入指纹映射
+    db.run(
+      'INSERT INTO fingerprint_mapping (user_id, fingerprint, is_primary) VALUES (?, ?, 0)',
+      [existingUserId, newFingerprint],
+      (err) => {
+        if (err) return reject(err);
+        console.log(`已合并指纹: ${newFingerprint} -> 用户ID: ${existingUserId}`);
+        resolve();
+      }
+    );
+  });
+}
+
+/**
+ * 检查公钥是否存在，如果存在返回其用户ID
+ */
+function checkKeyExists(publicKey) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      'SELECT user_id FROM ssh_keys WHERE public_key = ?',
+      [publicKey],
+      (err, row) => {
+        if (err) return reject(err);
+        resolve(row ? row.user_id : null);
+      }
+    );
+  });
+}
+
+/**
  * 验证公钥格式
  */
 function validatePublicKey(publicKey) {
@@ -52,88 +115,125 @@ function validatePublicKey(publicKey) {
 }
 
 /**
- * 添加公钥
+ * 添加公钥（支持自动合并指纹）
  */
 function addKey(userId, fingerprint, publicKey, comment) {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     const trimmedKey = publicKey.trim();
     
     if (!validatePublicKey(trimmedKey)) {
       return reject(new Error('无效的公钥格式'));
     }
 
-    // 检查公钥是否已存在
-    db.get(
-      'SELECT id FROM ssh_keys WHERE public_key = ?',
-      [trimmedKey],
-      (err, row) => {
-        if (err) return reject(err);
-        if (row) return reject(new Error('该公钥已存在'));
-
-        // 插入新公钥
-        db.run(
-          'INSERT INTO ssh_keys (user_id, fingerprint, public_key, comment) VALUES (?, ?, ?, ?)',
-          [userId, fingerprint, trimmedKey, comment],
-          function(err) {
-            if (err) return reject(err);
-            
-            // 同步到文件
-            syncAuthorizedKeys()
-              .then(() => resolve({ id: this.lastID }))
-              .catch(reject);
+    try {
+      // 检查公钥是否已存在
+      const existingUserId = await checkKeyExists(trimmedKey);
+      
+      if (existingUserId) {
+        // 公钥已存在
+        if (existingUserId === userId) {
+          // 同一用户重复添加
+          return reject(new Error('该公钥已存在'));
+        } else {
+          // 不同指纹的用户添加了已存在的公钥，执行指纹合并
+          try {
+            await mergeFingerprints(existingUserId, fingerprint);
+            return resolve({ 
+              id: null, 
+              merged: true,
+              existingUserId: existingUserId,
+              message: '检测到该公钥已存在，已自动合并您的浏览器指纹。现在您可以管理之前添加的所有 SSH 公钥了！'
+            });
+          } catch (mergeError) {
+            // 如果指纹已经映射过，说明已经合并过了
+            if (mergeError.message.includes('UNIQUE constraint failed')) {
+              return reject(new Error('该公钥已存在'));
+            }
+            return reject(mergeError);
           }
-        );
+        }
       }
-    );
-  });
-}
 
-/**
- * 删除公钥（只能删除自己添加的）
- */
-function deleteKey(keyId, fingerprint) {
-  return new Promise((resolve, reject) => {
-    // 先验证这个公钥是否属于该用户
-    db.get(
-      `SELECT sk.id FROM ssh_keys sk 
-       JOIN users u ON sk.user_id = u.id 
-       WHERE sk.id = ? AND u.fingerprint = ?`,
-      [keyId, fingerprint],
-      (err, row) => {
-        if (err) return reject(err);
-        if (!row) return reject(new Error('公钥不存在或无权删除'));
-
-        // 删除公钥
-        db.run('DELETE FROM ssh_keys WHERE id = ?', [keyId], (err) => {
+      // 公钥不存在，正常添加
+      db.run(
+        'INSERT INTO ssh_keys (user_id, fingerprint, public_key, comment) VALUES (?, ?, ?, ?)',
+        [userId, fingerprint, trimmedKey, comment],
+        function(err) {
           if (err) return reject(err);
           
           // 同步到文件
           syncAuthorizedKeys()
-            .then(() => resolve())
+            .then(() => resolve({ id: this.lastID, merged: false }))
             .catch(reject);
-        });
-      }
-    );
+        }
+      );
+    } catch (error) {
+      reject(error);
+    }
   });
 }
 
 /**
- * 获取用户的所有公钥
+ * 删除公钥（只能删除自己添加的，支持指纹映射）
+ */
+function deleteKey(keyId, fingerprint) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const userId = await getActualUserId(fingerprint);
+      if (!userId) {
+        return reject(new Error('用户不存在'));
+      }
+
+      // 先验证这个公钥是否属于该用户
+      db.get(
+        'SELECT id FROM ssh_keys WHERE id = ? AND user_id = ?',
+        [keyId, userId],
+        (err, row) => {
+          if (err) return reject(err);
+          if (!row) return reject(new Error('公钥不存在或无权删除'));
+
+          // 删除公钥
+          db.run('DELETE FROM ssh_keys WHERE id = ?', [keyId], (err) => {
+            if (err) return reject(err);
+            
+            // 同步到文件
+            syncAuthorizedKeys()
+              .then(() => resolve())
+              .catch(reject);
+          });
+        }
+      );
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+/**
+ * 获取用户的所有公钥（支持指纹映射）
  */
 function getUserKeys(fingerprint) {
-  return new Promise((resolve, reject) => {
-    db.all(
-      `SELECT sk.id, sk.public_key, sk.comment, sk.created_at 
-       FROM ssh_keys sk 
-       JOIN users u ON sk.user_id = u.id 
-       WHERE u.fingerprint = ? 
-       ORDER BY sk.created_at DESC`,
-      [fingerprint],
-      (err, rows) => {
-        if (err) return reject(err);
-        resolve(rows);
+  return new Promise(async (resolve, reject) => {
+    try {
+      const userId = await getActualUserId(fingerprint);
+      if (!userId) {
+        return resolve([]);
       }
-    );
+
+      db.all(
+        `SELECT sk.id, sk.public_key, sk.comment, sk.created_at 
+         FROM ssh_keys sk 
+         WHERE sk.user_id = ? 
+         ORDER BY sk.created_at DESC`,
+        [userId],
+        (err, rows) => {
+          if (err) return reject(err);
+          resolve(rows);
+        }
+      );
+    } catch (error) {
+      reject(error);
+    }
   });
 }
 
@@ -142,5 +242,8 @@ module.exports = {
   validatePublicKey,
   addKey,
   deleteKey,
-  getUserKeys
+  getUserKeys,
+  getActualUserId,
+  mergeFingerprints,
+  checkKeyExists
 };

@@ -39,9 +39,23 @@ db.serialize(() => {
     )
   `);
 
+  // 指纹映射表（多个指纹指向同一个用户）
+  db.run(`
+    CREATE TABLE IF NOT EXISTS fingerprint_mapping (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      fingerprint TEXT UNIQUE NOT NULL,
+      is_primary INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
   // 创建索引
   db.run(`CREATE INDEX IF NOT EXISTS idx_fingerprint ON users(fingerprint)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_user_id ON ssh_keys(user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_fingerprint_mapping ON fingerprint_mapping(fingerprint)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_fingerprint_mapping_user ON fingerprint_mapping(user_id)`);
 });
 
 module.exports = db;

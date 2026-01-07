@@ -296,29 +296,49 @@ app.post('/api/keys/add', async (req, res) => {
   }
 
   try {
-    // 获取用户 ID
-    db.get('SELECT id FROM users WHERE fingerprint = ?', [fingerprint], async (err, user) => {
-      if (err) {
-        console.error(err);
-        return res.status(500).json({ error: '数据库错误' });
-      }
+    // 获取用户 ID（支持指纹映射）
+    const userId = await keyManager.getActualUserId(fingerprint);
+    
+    if (!userId) {
+      // 用户不存在，创建新用户
+      db.run(
+        'INSERT INTO users (fingerprint) VALUES (?)',
+        [fingerprint],
+        async function(err) {
+          if (err) {
+            console.error(err);
+            return res.status(500).json({ error: '创建用户失败' });
+          }
 
-      if (!user) {
-        return res.status(404).json({ error: '用户不存在' });
-      }
-
+          try {
+            const result = await keyManager.addKey(this.lastID, fingerprint, publicKey, comment);
+            res.json({ 
+              success: true,
+              keyId: result.id,
+              merged: result.merged || false,
+              message: result.message || '公钥添加成功' 
+            });
+          } catch (error) {
+            console.error(error);
+            res.status(400).json({ error: error.message });
+          }
+        }
+      );
+    } else {
+      // 用户已存在，直接添加公钥
       try {
-        const result = await keyManager.addKey(user.id, fingerprint, publicKey, comment);
+        const result = await keyManager.addKey(userId, fingerprint, publicKey, comment);
         res.json({ 
           success: true,
           keyId: result.id,
-          message: '公钥添加成功' 
+          merged: result.merged || false,
+          message: result.message || '公钥添加成功' 
         });
       } catch (error) {
         console.error(error);
         res.status(400).json({ error: error.message });
       }
-    });
+    }
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: '添加公钥失败' });

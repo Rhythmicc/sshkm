@@ -197,7 +197,12 @@ async function addKey() {
     const data = await response.json();
 
     if (response.ok && data.success) {
-      showSuccess('add-success', '公钥添加成功！');
+      // 检查是否发生了指纹合并
+      if (data.merged) {
+        showSuccess('add-success', data.message || '检测到该公钥已存在，已自动合并您的浏览器指纹！现在您可以管理之前添加的所有 SSH 公钥了！');
+      } else {
+        showSuccess('add-success', data.message || '公钥添加成功！');
+      }
       publicKeyInput.value = '';
       commentInput.value = '';
       loadKeys();
