@@ -357,16 +357,34 @@ function getActiveTunnelPorts() {
 }
 
 /**
- * 解析 ss/netstat 输出，提取监听端口号集合
+ * 解析 ss/netstat 输出，提取 sshd 监听的端口号集合
+ * ss 输出格式（-tlnp）：
+ *   tcp  LISTEN  0  128  0.0.0.0:6000  0.0.0.0:*  users:(("sshd",pid=...,fd=...))
+ * - 有进程信息（root 运行）时只取 sshd 行，精确识别反向隧道
+ * - 无进程信息（非 root）时取所有 LISTEN 行，由调用方的端口列表交集过滤
+ * IPv4/IPv6 重复行由 Set 自动去重
  */
 function parseListeningPorts(output) {
   const ports = new Set();
-  const lines = output.split('\n');
-  for (const line of lines) {
-    // 匹配格式如 "127.0.0.1:10001" 或 "*:10001" 或 ":::10001"
-    const match = line.match(/[\s:]+(\d+)\s/);
-    if (match) {
-      ports.add(parseInt(match[1], 10));
+  // 判断输出中是否含有进程信息（需要 root 权限才能看到）
+  const hasProcInfo = output.includes('sshd');
+
+  for (const line of output.split('\n')) {
+    if (hasProcInfo) {
+      // 有进程信息：只处理 sshd 监听行，精确匹配反向隧道
+      if (!line.includes('sshd')) continue;
+    } else {
+      // 无进程信息：处理所有 LISTEN 行，靠端口列表交集兜底
+      if (!line.includes('LISTEN')) continue;
+    }
+
+    // 本地地址在第5列（索引4），格式为 "0.0.0.0:PORT" 或 "[::]:PORT"
+    const fields = line.trim().split(/\s+/);
+    const localAddr = fields[4];
+    if (!localAddr) continue;
+    const port = parseInt(localAddr.split(':').pop(), 10);
+    if (Number.isInteger(port) && port > 0 && port <= 65535) {
+      ports.add(port);
     }
   }
   return ports;

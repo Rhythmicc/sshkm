@@ -306,11 +306,11 @@ async function setCustomPort(keyId) {
  */
 function copyTunnelCmd(port) {
   const serverHost = window.location.hostname;
-  const cmd = `ssh -N -R ${port}:localhost:22 user@${serverHost}`;
+  const cmd = `ssh -f -N -R ${port}:localhost:22 user@${serverHost}`;
   navigator.clipboard.writeText(cmd).then(() => {
     showSuccess('add-success', `命令已复制：${cmd}`);
   }).catch(() => {
-    prompt('请手动复制以下命令：', `ssh -N -R ${port}:localhost:22 user@${serverHost}`);
+    prompt('请手动复制以下命令：', `ssh -f -N -R ${port}:localhost:22 user@${serverHost}`);
   });
 }
 
@@ -321,7 +321,7 @@ function showTunnelGuide(port, comment) {
   const serverHost = window.location.hostname;
   const sshUser = 'YOUR_SSH_USER'; // 用户需替换为实际着陆用户名
   const svcName = `ssh-tunnel-${port}`;
-  const cmd = `ssh -N -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -R ${port}:localhost:22 ${sshUser}@${serverHost}`;
+  const cmd = `ssh -f -N -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -R ${port}:localhost:22 ${sshUser}@${serverHost}`;
   const serviceContent = `[Unit]
 Description=SSH Reverse Tunnel (port ${port}${comment ? ' - ' + comment : ''})
 After=network-online.target
@@ -332,7 +332,7 @@ Type=simple
 User=${sshUser}
 Restart=always
 RestartSec=30
-ExecStart=/usr/bin/ssh -N \\
+ExecStart=/usr/bin/ssh -f -N \\
   -o ServerAliveInterval=60 \\
   -o ServerAliveCountMax=3 \\
   -o ExitOnForwardFailure=yes \\
@@ -349,12 +349,12 @@ WantedBy=multi-user.target`;
       <ul>
         <li>公钥备注：<strong>${escapeHtml(comment || '无')}</strong></li>
         <li>分配端口：<strong>${port}</strong></li>
-        <li>足跳山服务器：<strong>${serverHost}</strong></li>
+        <li>跳板服务：<strong>${serverHost}</strong></li>
       </ul>
     </div>
 
     <div class="guide-section">
-      <h3>① 在远端机器上配置 SSH 密阥免密登录</h3>
+      <h3>① 在远端机器上配置 SSH 密钥免密登录</h3>
       <p>将当前公钥对应的私钥添加到远端机器，确保可免密 SSH 到该服务器：</p>
       <pre class="code-block">ssh-copy-id ${sshUser}@${serverHost}
 # 或手动将公钥内容追加到服务器 ~/.ssh/authorized_keys</pre>
@@ -362,7 +362,7 @@ WantedBy=multi-user.target`;
 
     <div class="guide-section">
       <h3>② 手动测试隧道连接</h3>
-      <p>在20000 和 30000-... 等高位端口的神奇尔服务器，在远端机器上运行：</p>
+      <p>在远端机器上运行：</p>
       <div class="copy-wrap">
         <pre class="code-block" id="guide-cmd">${escapeHtml(cmd)}</pre>
         <button class="btn btn-copy guide-copy-btn" onclick="copyText('guide-cmd')">📋 复制</button>
@@ -400,6 +400,7 @@ sudo systemctl status ${svcName}.service</pre>
   &lt;key&gt;ProgramArguments&lt;/key&gt;
   &lt;array&gt;
     &lt;string&gt;/usr/bin/ssh&lt;/string&gt;
+    &lt;string&gt;-f&lt;/string&gt;
     &lt;string&gt;-N&lt;/string&gt;
     &lt;string&gt;-o&lt;/string&gt;&lt;string&gt;ServerAliveInterval=60&lt;/string&gt;
     &lt;string&gt;-o&lt;/string&gt;&lt;string&gt;ServerAliveCountMax=3&lt;/string&gt;
