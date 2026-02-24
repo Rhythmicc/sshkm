@@ -339,19 +339,24 @@ function releaseTunnelPort(keyId, userId) {
  */
 function getActiveTunnelPorts() {
   return new Promise((resolve) => {
-    // ss -tlnp: 显示 TCP 监听端口，包含进程信息
-    // 当远端机器通过 ssh -R <port>:... 建立遥控隔道时，
-    // sshd 会在本地监听该端口，因此可简单判断活跃性
-    exec('ss -tlnp', (err, stdout) => {
+    exec('ss -tlnp', (err, stdout, stderr) => {
+      console.log('[DEBUG] ss -tlnp err:', err ? err.message : null);
+      console.log('[DEBUG] ss -tlnp stderr:', stderr);
+      console.log('[DEBUG] ss -tlnp stdout:\n' + stdout);
       if (err) {
-        // 如果 ss 不可用，尝试 netstat 备用（macOS/少数 Linux）
-        exec('netstat -tlnp 2>/dev/null || netstat -anp tcp 2>/dev/null', (err2, stdout2) => {
+        exec('netstat -tlnp 2>/dev/null || netstat -anp tcp 2>/dev/null', (err2, stdout2, stderr2) => {
+          console.log('[DEBUG] netstat err:', err2 ? err2.message : null);
+          console.log('[DEBUG] netstat stdout:\n' + stdout2);
           if (err2) return resolve(new Set());
-          resolve(parseListeningPorts(stdout2));
+          const result = parseListeningPorts(stdout2);
+          console.log('[DEBUG] parseListeningPorts result (netstat):', [...result]);
+          resolve(result);
         });
         return;
       }
-      resolve(parseListeningPorts(stdout));
+      const result = parseListeningPorts(stdout);
+      console.log('[DEBUG] parseListeningPorts result (ss):', [...result]);
+      resolve(result);
     });
   });
 }
@@ -366,23 +371,22 @@ function getActiveTunnelPorts() {
  */
 function parseListeningPorts(output) {
   const ports = new Set();
-  // 判断输出中是否含有进程信息（需要 root 权限才能看到）
   const hasProcInfo = output.includes('sshd');
+  console.log('[DEBUG] parseListeningPorts: hasProcInfo =', hasProcInfo);
 
   for (const line of output.split('\n')) {
     if (hasProcInfo) {
-      // 有进程信息：只处理 sshd 监听行，精确匹配反向隧道
       if (!line.includes('sshd')) continue;
     } else {
-      // 无进程信息：处理所有 LISTEN 行，靠端口列表交集兜底
       if (!line.includes('LISTEN')) continue;
     }
-
-    // 本地地址在第5列（索引4），格式为 "0.0.0.0:PORT" 或 "[::]:PORT"
+    console.log('[DEBUG] matched line:', JSON.stringify(line));
     const fields = line.trim().split(/\s+/);
+    console.log('[DEBUG] fields:', fields);
     const localAddr = fields[4];
-    if (!localAddr) continue;
+    if (!localAddr) { console.log('[DEBUG] no localAddr, skip'); continue; }
     const port = parseInt(localAddr.split(':').pop(), 10);
+    console.log('[DEBUG] localAddr:', localAddr, '-> port:', port);
     if (Number.isInteger(port) && port > 0 && port <= 65535) {
       ports.add(port);
     }

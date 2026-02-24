@@ -472,8 +472,11 @@ app.post('/api/tunnel/status', async (req, res) => {
     }
 
     // 通过 ss 检测哪些端口当前处于活跃监听状态
+    console.log('[DEBUG] tunnel/status allocatedPorts:', allocatedPorts);
     const listeningPorts = await keyManager.getActiveTunnelPorts();
+    console.log('[DEBUG] tunnel/status listeningPorts:', [...listeningPorts]);
     const activePorts = allocatedPorts.filter(p => listeningPorts.has(p));
+    console.log('[DEBUG] tunnel/status activePorts:', activePorts);
 
     res.json({ activePorts, portMin, portMax });
   } catch (error) {
