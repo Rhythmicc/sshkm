@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SSH 公钥管理</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔑</text></svg>">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -36,6 +37,13 @@
         <h2>➕ 添加公钥</h2>
         <textarea id="public-key-input" placeholder="粘贴您的 SSH 公钥（例如：ssh-rsa AAAAB3...）" rows="4"></textarea>
         <input type="text" id="key-comment-input" placeholder="备注（可选）" maxlength="100">
+        <div class="port-request-row">
+          <label class="toggle-label">
+            <input type="checkbox" id="request-port-checkbox">
+            <span class="toggle-slider"></span>
+            <span class="toggle-text">申请 SSH 隧道端口（用于反向隧道穿透）</span>
+          </label>
+        </div>
         <button id="add-key-btn" class="btn btn-primary">添加公钥</button>
         <div id="add-error" class="error-message"></div>
         <div id="add-success" class="success-message"></div>
@@ -43,7 +51,10 @@
 
       <!-- 公钥列表 -->
       <div class="card">
-        <h2>🔑 我的公钥列表</h2>
+        <div class="keys-list-header">
+          <h2>🔑 我的公钥列表</h2>
+          <button id="refresh-status-btn" class="btn btn-secondary btn-sm" title="刷新隧道状态">⟳ 刷新状态</button>
+        </div>
         <div id="keys-list"></div>
       </div>
     </div>
@@ -52,5 +63,16 @@
   <!-- 加载 FingerprintJS（本地版本，避免被广告拦截器阻止） -->
   <script src="fp.min.js"></script>
   <script src="app.js"></script>
+
+  <!-- SSH 隧道配置指南 Modal -->
+  <div id="tunnel-guide-modal" class="modal-overlay" style="display:none;" onclick="closeTunnelGuide(event)">
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2>🛡️ SSH 隧道配置指南</h2>
+        <button class="modal-close" onclick="closeTunnelGuide()">&times;</button>
+      </div>
+      <div class="modal-body" id="tunnel-guide-content"></div>
+    </div>
+  </div>
 </body>
 </html>

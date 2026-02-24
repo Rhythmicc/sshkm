@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { exec } = require('child_process');
 const config = require('./config');
 const db = require('./database');
 
@@ -221,7 +222,7 @@ function getUserKeys(fingerprint) {
       }
 
       db.all(
-        `SELECT sk.id, sk.public_key, sk.comment, sk.created_at 
+        `SELECT sk.id, sk.public_key, sk.comment, sk.created_at, sk.tunnel_port
          FROM ssh_keys sk 
          WHERE sk.user_id = ? 
          ORDER BY sk.created_at DESC`,
@@ -237,6 +238,162 @@ function getUserKeys(fingerprint) {
   });
 }
 
+/**
+ * 分配一个可用端口给指定公钥（需已验证用户所有权）
+ */
+function allocateTunnelPort(keyId, userId) {
+  return new Promise((resolve, reject) => {
+    const { portMin, portMax } = config.tunnel;
+
+    // 查询当前已占用的所有端口
+    db.all(
+      'SELECT tunnel_port FROM ssh_keys WHERE tunnel_port IS NOT NULL',
+      [],
+      (err, rows) => {
+        if (err) return reject(err);
+
+        const usedPorts = new Set(rows.map(r => r.tunnel_port));
+        let assignedPort = null;
+        for (let p = portMin; p <= portMax; p++) {
+          if (!usedPorts.has(p)) {
+            assignedPort = p;
+            break;
+          }
+        }
+
+        if (assignedPort === null) {
+          return reject(new Error(`端口池已耗尽（${portMin}-${portMax}）`));
+        }
+
+        // 验证公钥属于该用户，同时更新
+        db.run(
+          'UPDATE ssh_keys SET tunnel_port = ? WHERE id = ? AND user_id = ?',
+          [assignedPort, keyId, userId],
+          function(err) {
+            if (err) return reject(err);
+            if (this.changes === 0) return reject(new Error('公钥不存在或无权操作'));
+            resolve(assignedPort);
+          }
+        );
+      }
+    );
+  });
+}
+
+/**
+ * 手动设置自定义隧道端口（仅限已有公钥、未分配端口时）
+ * 检查：端口未被占用、属于该用户、公钥当前无端口
+ */
+function setCustomTunnelPort(keyId, userId, port) {
+  return new Promise((resolve, reject) => {
+    // 检查端口是否已被占用（排除当前公钥自身）
+    db.get(
+      'SELECT id FROM ssh_keys WHERE tunnel_port = ? AND id != ?',
+      [port, keyId],
+      (err, conflict) => {
+        if (err) return reject(err);
+        if (conflict) return reject(new Error(`端口 ${port} 已被其他公钥占用`));
+
+        // 硾认公钥属于该用户且当前未分配端口
+        db.run(
+          'UPDATE ssh_keys SET tunnel_port = ? WHERE id = ? AND user_id = ? AND tunnel_port IS NULL',
+          [port, keyId, userId],
+          function(err) {
+            if (err) {
+              // UNIQUE 冲突（并发情况）
+              if (err.message && err.message.includes('UNIQUE')) {
+                return reject(new Error(`端口 ${port} 已被占用`));
+              }
+              return reject(err);
+            }
+            if (this.changes === 0) {
+              return reject(new Error('公钥不存在、无权操作或已分配了端口'));
+            }
+            resolve();
+          }
+        );
+      }
+    );
+  });
+}
+
+/**
+ * 释放指定公钥的隧道端口
+ */
+function releaseTunnelPort(keyId, userId) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      'UPDATE ssh_keys SET tunnel_port = NULL WHERE id = ? AND user_id = ?',
+      [keyId, userId],
+      function(err) {
+        if (err) return reject(err);
+        if (this.changes === 0) return reject(new Error('公钥不存在或无权操作'));
+        resolve();
+      }
+    );
+  });
+}
+
+/**
+ * 通过 ss 命令检测当前处于监听状态的端口集合（即活跃 SSH 隧道）
+ */
+function getActiveTunnelPorts() {
+  return new Promise((resolve) => {
+    exec('ss -tulpn | grep sshd', (err, stdout, stderr) => {
+      console.log('[DEBUG] ss -tulpn err:', err ? err.message : null);
+      console.log('[DEBUG] ss -tulpn stderr:', stderr);
+      console.log('[DEBUG] ss -tulpn stdout:\n' + stdout);
+      if (err) {
+        exec('netstat -tlnp 2>/dev/null || netstat -anp tcp 2>/dev/null', (err2, stdout2, stderr2) => {
+          console.log('[DEBUG] netstat err:', err2 ? err2.message : null);
+          console.log('[DEBUG] netstat stdout:\n' + stdout2);
+          if (err2) return resolve(new Set());
+          const result = parseListeningPorts(stdout2);
+          console.log('[DEBUG] parseListeningPorts result (netstat):', [...result]);
+          resolve(result);
+        });
+        return;
+      }
+      const result = parseListeningPorts(stdout);
+      console.log('[DEBUG] parseListeningPorts result (ss):', [...result]);
+      resolve(result);
+    });
+  });
+}
+
+/**
+ * 解析 ss/netstat 输出，提取 sshd 监听的端口号集合
+ * ss 输出格式（-tulpn）：
+ *   tcp  LISTEN  0  128  0.0.0.0:6000  0.0.0.0:*  users:(("sshd",pid=...,fd=...))
+ * - 有进程信息（root 运行）时只取 sshd 行，精确识别反向隧道
+ * - 无进程信息（非 root）时取所有 LISTEN 行，由调用方的端口列表交集过滤
+ * IPv4/IPv6 重复行由 Set 自动去重
+ */
+function parseListeningPorts(output) {
+  const ports = new Set();
+  const hasProcInfo = output.includes('sshd');
+  console.log('[DEBUG] parseListeningPorts: hasProcInfo =', hasProcInfo);
+
+  for (const line of output.split('\n')) {
+    if (hasProcInfo) {
+      if (!line.includes('sshd')) continue;
+    } else {
+      if (!line.includes('LISTEN')) continue;
+    }
+    console.log('[DEBUG] matched line:', JSON.stringify(line));
+    const fields = line.trim().split(/\s+/);
+    console.log('[DEBUG] fields:', fields);
+    const localAddr = fields[4];
+    if (!localAddr) { console.log('[DEBUG] no localAddr, skip'); continue; }
+    const port = parseInt(localAddr.split(':').pop(), 10);
+    console.log('[DEBUG] localAddr:', localAddr, '-> port:', port);
+    if (Number.isInteger(port) && port > 0 && port <= 65535) {
+      ports.add(port);
+    }
+  }
+  return ports;
+}
+
 module.exports = {
   syncAuthorizedKeys,
   validatePublicKey,
@@ -245,5 +402,9 @@ module.exports = {
   getUserKeys,
   getActualUserId,
   mergeFingerprints,
-  checkKeyExists
+  checkKeyExists,
+  allocateTunnelPort,
+  releaseTunnelPort,
+  getActiveTunnelPorts,
+  setCustomTunnelPort,
 };

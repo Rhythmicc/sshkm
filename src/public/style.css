@@ -281,3 +281,414 @@ textarea {
     font-size: 24px;
   }
 }
+
+/* ==================== SSH 隧道端口功能样式 ==================== */
+
+/* 申请端口 toggle 行 */
+.port-request-row {
+  margin-bottom: 15px;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-label input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
+  accent-color: #667eea;
+  width: 16px;
+  height: 16px;
+}
+
+.toggle-text {
+  font-size: 14px;
+  color: #555;
+}
+
+/* 公钥列表标题栏（含刷新按钮） */
+.keys-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.keys-list-header h2 {
+  margin-bottom: 0;
+}
+
+.btn-sm {
+  padding: 6px 14px;
+  font-size: 13px;
+}
+
+/* 隧道信息区块 */
+.tunnel-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #e9ecef;
+}
+
+.tunnel-none {
+  color: #aaa;
+}
+
+.tunnel-none-text {
+  font-size: 13px;
+  color: #aaa;
+}
+
+/* 活跃/关闭状态标签 */
+.tunnel-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tunnel-status.active {
+  background: #d4edda;
+  color: #155724;
+}
+
+.tunnel-status.inactive {
+  background: #e9ecef;
+  color: #6c757d;
+}
+
+/* 状态小圆点 */
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.tunnel-status.active .status-dot {
+  background: #28a745;
+  box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.4);
+  animation: pulse-green 1.5s ease-in-out infinite;
+}
+
+.tunnel-status.inactive .status-dot {
+  background: #9aa0a6;
+}
+
+@keyframes pulse-green {
+  0%   { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.5); }
+  70%  { box-shadow: 0 0 0 6px rgba(40, 167, 69, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+}
+
+/* 端口号显示 */
+.tunnel-port {
+  font-size: 13px;
+  color: #495057;
+  background: #f1f3f5;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: 'Monaco', 'Courier New', monospace;
+}
+
+/* 操作按钮 */
+.btn-copy {
+  background: #17a2b8;
+  color: white;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.btn-copy:hover {
+  background: #138496;
+}
+
+.btn-release {
+  background: #fd7e14;
+  color: white;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.btn-release:hover {
+  background: #e96900;
+}
+
+.btn-allocate {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.btn-allocate:hover {
+  opacity: 0.9;
+}
+
+@media (max-width: 600px) {
+  .tunnel-info {
+    gap: 6px;
+  }
+  .keys-list-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+}
+
+/* ==================== 手动端口输入 ==================== */
+
+.port-assign-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.port-manual-input {
+  flex: 1;
+  min-width: 160px;
+  max-width: 220px;
+  padding: 6px 10px;
+  border: 2px solid #dee2e6;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: 'Monaco', 'Courier New', monospace;
+  margin-bottom: 0;
+  transition: border-color 0.2s;
+}
+
+.port-manual-input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.or-divider {
+  color: #aaa;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.btn-set-port {
+  background: #20c997;
+  color: white;
+  padding: 5px 12px;
+  font-size: 13px;
+}
+
+.btn-set-port:hover {
+  background: #17a589;
+}
+
+/* ==================== 隧道操作按钮行 ==================== */
+
+.tunnel-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.btn-guide {
+  background: #6f42c1;
+  color: white;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.btn-guide:hover {
+  background: #5936a2;
+}
+
+/* ==================== 配置指南 Modal ==================== */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px 16px;
+  overflow-y: auto;
+  backdrop-filter: blur(2px);
+}
+
+.modal-box {
+  background: #fff;
+  border-radius: 14px;
+  width: 100%;
+  max-width: 720px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  animation: modal-in 0.2s ease;
+}
+
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(-20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px 24px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.modal-header h2 {
+  color: white;
+  font-size: 18px;
+  margin: 0;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.8);
+  font-size: 26px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 4px;
+  transition: color 0.2s;
+}
+
+.modal-close:hover {
+  color: white;
+}
+
+.modal-body {
+  padding: 24px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+/* 指南内容 */
+.guide-section {
+  margin-bottom: 24px;
+}
+
+.guide-section h3 {
+  font-size: 15px;
+  color: #444;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.guide-section ul {
+  list-style: none;
+  padding: 0;
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+
+.guide-section ul li {
+  padding: 3px 0;
+  font-size: 14px;
+  color: #555;
+}
+
+.guide-section p {
+  font-size: 14px;
+  color: #555;
+  margin: 8px 0;
+  line-height: 1.6;
+}
+
+.guide-note {
+  color: #888 !important;
+  font-size: 13px !important;
+}
+
+.copy-wrap {
+  position: relative;
+  margin: 8px 0;
+}
+
+.code-block {
+  background: #1e1e2e;
+  color: #cdd6f4;
+  font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  padding: 14px 110px 14px 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  white-space: pre;
+  margin: 0;
+}
+
+.guide-copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.25);
+  color: #cdd6f4;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.guide-copy-btn:hover {
+  background: rgba(255,255,255,0.28);
+  transform: none;
+  box-shadow: none;
+}
+
+code {
+  background: #f0f0f0;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  color: #c0392b;
+}
+
+.badge-active {
+  display: inline-block;
+  background: #d4edda;
+  color: #155724;
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+@media (max-width: 600px) {
+  .modal-body {
+    padding: 16px;
+  }
+  .code-block {
+    padding: 12px 12px 40px;
+  }
+  .guide-copy-btn {
+    top: auto;
+    bottom: 8px;
+    right: 8px;
+  }
+  .port-manual-input {
+    min-width: 120px;
+  }
+}

@@ -56,6 +56,16 @@ db.serialize(() => {
   db.run(`CREATE INDEX IF NOT EXISTS idx_user_id ON ssh_keys(user_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_fingerprint_mapping ON fingerprint_mapping(fingerprint)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_fingerprint_mapping_user ON fingerprint_mapping(user_id)`);
+
+  // === 数据迁移：为 ssh_keys 增加 tunnel_port 列（兼容已有数据库）===
+  db.run(`ALTER TABLE ssh_keys ADD COLUMN tunnel_port INTEGER NULL`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error('迁移 tunnel_port 列失败:', err.message);
+    }
+  });
+  // tunnel_port 唯一索引（允许 NULL 重复，实际由应用层保证非空时唯一）
+  db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tunnel_port ON ssh_keys(tunnel_port)
+    WHERE tunnel_port IS NOT NULL`);
 });
 
 module.exports = db;

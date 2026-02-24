@@ -367,6 +367,124 @@ app.post('/api/keys/delete', async (req, res) => {
   }
 });
 
+/**
+ * 为指定公钥申请分配 SSH 隧道端口
+ */
+app.post('/api/keys/allocate-port', async (req, res) => {
+  const { fingerprint, keyId } = req.body;
+
+  if (!fingerprint || !keyId) {
+    return res.status(400).json({ error: '缺少必要参数' });
+  }
+
+  try {
+    const userId = await keyManager.getActualUserId(fingerprint);
+    if (!userId) {
+      return res.status(401).json({ error: '用户不存在' });
+    }
+
+    const port = await keyManager.allocateTunnelPort(keyId, userId);
+    res.json({
+      success: true,
+      port,
+      message: `已成功分配端口 ${port}`
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+/**
+ * 释放指定公钥的 SSH 隧道端口
+ */
+app.post('/api/keys/release-port', async (req, res) => {
+  const { fingerprint, keyId } = req.body;
+
+  if (!fingerprint || !keyId) {
+    return res.status(400).json({ error: '缺少必要参数' });
+  }
+
+  try {
+    const userId = await keyManager.getActualUserId(fingerprint);
+    if (!userId) {
+      return res.status(401).json({ error: '用户不存在' });
+    }
+
+    await keyManager.releaseTunnelPort(keyId, userId);
+    res.json({ success: true, message: '端口已释放' });
+  } catch (error) {
+    console.error(error);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+/**
+ * 手动为已有公钥设置自定义隧道端口
+ */
+app.post('/api/keys/set-port', async (req, res) => {
+  const { fingerprint, keyId, port } = req.body;
+
+  if (!fingerprint || !keyId || port == null) {
+    return res.status(400).json({ error: '缺少必要参数' });
+  }
+
+  const portNum = parseInt(port, 10);
+  if (!Number.isInteger(portNum) || portNum < 1024 || portNum > 65535) {
+    return res.status(400).json({ error: '端口号必须在 1024-65535 之间' });
+  }
+
+  try {
+    const userId = await keyManager.getActualUserId(fingerprint);
+    if (!userId) {
+      return res.status(401).json({ error: '用户不存在' });
+    }
+
+    await keyManager.setCustomTunnelPort(keyId, userId, portNum);
+    res.json({ success: true, port: portNum, message: `端口 ${portNum} 设置成功` });
+  } catch (error) {
+    console.error(error);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+/**
+ * 获取当前活跃隧道端口状态
+ * 返回：用户所有公钥的端口，以及哪些端口当前处于活跃监听状态
+ */
+app.post('/api/tunnel/status', async (req, res) => {
+  const { fingerprint } = req.body;
+
+  if (!fingerprint) {
+    return res.status(400).json({ error: '缺少浏览器指纹' });
+  }
+
+  try {
+    // 获取用户所有带端口的公钥
+    const keys = await keyManager.getUserKeys(fingerprint);
+    const allocatedPorts = keys
+      .filter(k => k.tunnel_port !== null && k.tunnel_port !== undefined)
+      .map(k => k.tunnel_port);
+
+    const { portMin, portMax } = config.tunnel;
+    if (allocatedPorts.length === 0) {
+      return res.json({ activePorts: [], portMin, portMax });
+    }
+
+    // 通过 ss 检测哪些端口当前处于活跃监听状态
+    console.log('[DEBUG] tunnel/status allocatedPorts:', allocatedPorts);
+    const listeningPorts = await keyManager.getActiveTunnelPorts();
+    console.log('[DEBUG] tunnel/status listeningPorts:', [...listeningPorts]);
+    const activePorts = allocatedPorts.filter(p => listeningPorts.has(p));
+    console.log('[DEBUG] tunnel/status activePorts:', activePorts);
+
+    res.json({ activePorts, portMin, portMax });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: '检测隧道状态失败' });
+  }
+});
+
 // ==================== 启动服务器 ====================
 
 /**
