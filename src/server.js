@@ -467,8 +467,9 @@ app.post('/api/tunnel/status', async (req, res) => {
       .map(k => k.tunnel_port);
 
     const { portMin, portMax } = config.tunnel;
+    const sshUser = config.ssh.sshUser;
     if (allocatedPorts.length === 0) {
-      return res.json({ activePorts: [], portMin, portMax });
+      return res.json({ activePorts: [], portMin, portMax, sshUser });
     }
 
     // 通过 ss 检测哪些端口当前处于活跃监听状态
@@ -478,7 +479,7 @@ app.post('/api/tunnel/status', async (req, res) => {
     const activePorts = allocatedPorts.filter(p => listeningPorts.has(p));
     console.log('[DEBUG] tunnel/status activePorts:', activePorts);
 
-    res.json({ activePorts, portMin, portMax });
+    res.json({ activePorts, portMin, portMax, sshUser });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: '检测隧道状态失败' });

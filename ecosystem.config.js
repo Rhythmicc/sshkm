@@ -9,6 +9,7 @@ module.exports = {
       HOST: '0.0.0.0',
       PORT: 3000,
       AUTHORIZED_KEYS_PATH: '/path/to/.ssh/authorized_keys',
+      SSH_USER: 'jumpuser',
       // SSH 隧道端口分配范围（建议使用高位端口，与业务端口隔离）
       TUNNEL_PORT_MIN: '20000',
       TUNNEL_PORT_MAX: '29999',
