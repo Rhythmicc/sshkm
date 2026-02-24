@@ -307,11 +307,12 @@ async function setCustomPort(keyId) {
  */
 function copyTunnelCmd(port) {
   const serverHost = window.location.hostname;
-  const cmd = `ssh -f -N -R ${port}:localhost:22 user@${serverHost}`;
+  const sshUser = tunnelSshUser || 'YOUR_SSH_USER';
+  const cmd = `ssh -f -N -R ${port}:localhost:22 ${sshUser}@${serverHost}`;
   navigator.clipboard.writeText(cmd).then(() => {
     showSuccess('add-success', `命令已复制：${cmd}`);
   }).catch(() => {
-    prompt('请手动复制以下命令：', `ssh -f -N -R ${port}:localhost:22 user@${serverHost}`);
+    prompt('请手动复制以下命令：', `ssh -f -N -R ${port}:localhost:22 ${sshUser}@${serverHost}`);
   });
 }
 
