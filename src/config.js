@@ -37,6 +37,16 @@ module.exports = {
     path: './database.db',
   },
 
+  // SSH Tunnel 端口分配配置
+  tunnel: {
+    // 可分配端口最小值（含）
+    portMin: parseInt(process.env.TUNNEL_MIN_PORT || '6000', 10),
+    // 可分配端口最大值（含）
+    portMax: parseInt(process.env.TUNNEL_MAX_PORT || '6100', 10),
+    // 轮询检测活跃隧道的间隔（毫秒）
+    pollIntervalMs: parseInt(process.env.TUNNEL_POLL_INTERVAL_MS || '10000', 10),
+  },
+
   // 日志配置
   logging: {
     // 是否启用详细日志

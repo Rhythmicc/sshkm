@@ -1,5 +1,4 @@
-// PM2 进程管理配置文件
-// 使用方法: pm2 start ecosystem.config.js
+// pm2 start ecosystem.config.js
 
 module.exports = {
   apps: [{
@@ -10,6 +9,11 @@ module.exports = {
       HOST: '0.0.0.0',
       PORT: 3000,
       AUTHORIZED_KEYS_PATH: '/path/to/.ssh/authorized_keys',
+      // SSH 隧道端口分配范围（建议使用高位端口，与业务端口隔离）
+      TUNNEL_PORT_MIN: '20000',
+      TUNNEL_PORT_MAX: '29999',
+      // 隧道状态轮询间隔（毫秒），同步前端 app.js 的 10000ms
+      TUNNEL_POLL_INTERVAL: '10000'
     },
 
     name: 'ssh-key-manager',

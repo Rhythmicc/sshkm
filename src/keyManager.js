@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { exec } = require('child_process');
 const config = require('./config');
 const db = require('./database');
 
@@ -221,7 +222,7 @@ function getUserKeys(fingerprint) {
       }
 
       db.all(
-        `SELECT sk.id, sk.public_key, sk.comment, sk.created_at 
+        `SELECT sk.id, sk.public_key, sk.comment, sk.created_at, sk.tunnel_port
          FROM ssh_keys sk 
          WHERE sk.user_id = ? 
          ORDER BY sk.created_at DESC`,
@@ -237,6 +238,140 @@ function getUserKeys(fingerprint) {
   });
 }
 
+/**
+ * 分配一个可用端口给指定公钥（需已验证用户所有权）
+ */
+function allocateTunnelPort(keyId, userId) {
+  return new Promise((resolve, reject) => {
+    const { portMin, portMax } = config.tunnel;
+
+    // 查询当前已占用的所有端口
+    db.all(
+      'SELECT tunnel_port FROM ssh_keys WHERE tunnel_port IS NOT NULL',
+      [],
+      (err, rows) => {
+        if (err) return reject(err);
+
+        const usedPorts = new Set(rows.map(r => r.tunnel_port));
+        let assignedPort = null;
+        for (let p = portMin; p <= portMax; p++) {
+          if (!usedPorts.has(p)) {
+            assignedPort = p;
+            break;
+          }
+        }
+
+        if (assignedPort === null) {
+          return reject(new Error(`端口池已耗尽（${portMin}-${portMax}）`));
+        }
+
+        // 验证公钥属于该用户，同时更新
+        db.run(
+          'UPDATE ssh_keys SET tunnel_port = ? WHERE id = ? AND user_id = ?',
+          [assignedPort, keyId, userId],
+          function(err) {
+            if (err) return reject(err);
+            if (this.changes === 0) return reject(new Error('公钥不存在或无权操作'));
+            resolve(assignedPort);
+          }
+        );
+      }
+    );
+  });
+}
+
+/**
+ * 手动设置自定义隧道端口（仅限已有公钥、未分配端口时）
+ * 检查：端口未被占用、属于该用户、公钥当前无端口
+ */
+function setCustomTunnelPort(keyId, userId, port) {
+  return new Promise((resolve, reject) => {
+    // 检查端口是否已被占用（排除当前公钥自身）
+    db.get(
+      'SELECT id FROM ssh_keys WHERE tunnel_port = ? AND id != ?',
+      [port, keyId],
+      (err, conflict) => {
+        if (err) return reject(err);
+        if (conflict) return reject(new Error(`端口 ${port} 已被其他公钥占用`));
+
+        // 硾认公钥属于该用户且当前未分配端口
+        db.run(
+          'UPDATE ssh_keys SET tunnel_port = ? WHERE id = ? AND user_id = ? AND tunnel_port IS NULL',
+          [port, keyId, userId],
+          function(err) {
+            if (err) {
+              // UNIQUE 冲突（并发情况）
+              if (err.message && err.message.includes('UNIQUE')) {
+                return reject(new Error(`端口 ${port} 已被占用`));
+              }
+              return reject(err);
+            }
+            if (this.changes === 0) {
+              return reject(new Error('公钥不存在、无权操作或已分配了端口'));
+            }
+            resolve();
+          }
+        );
+      }
+    );
+  });
+}
+
+/**
+ * 释放指定公钥的隧道端口
+ */
+function releaseTunnelPort(keyId, userId) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      'UPDATE ssh_keys SET tunnel_port = NULL WHERE id = ? AND user_id = ?',
+      [keyId, userId],
+      function(err) {
+        if (err) return reject(err);
+        if (this.changes === 0) return reject(new Error('公钥不存在或无权操作'));
+        resolve();
+      }
+    );
+  });
+}
+
+/**
+ * 通过 ss 命令检测当前处于监听状态的端口集合（即活跃 SSH 隧道）
+ */
+function getActiveTunnelPorts() {
+  return new Promise((resolve) => {
+    // ss -tlnp: 显示 TCP 监听端口，包含进程信息
+    // 当远端机器通过 ssh -R <port>:... 建立遥控隔道时，
+    // sshd 会在本地监听该端口，因此可简单判断活跃性
+    exec('ss -tlnp', (err, stdout) => {
+      if (err) {
+        // 如果 ss 不可用，尝试 netstat 备用（macOS/少数 Linux）
+        exec('netstat -tlnp 2>/dev/null || netstat -anp tcp 2>/dev/null', (err2, stdout2) => {
+          if (err2) return resolve(new Set());
+          resolve(parseListeningPorts(stdout2));
+        });
+        return;
+      }
+      resolve(parseListeningPorts(stdout));
+    });
+  });
+}
+
+/**
+ * 解析 ss/netstat 输出，提取监听端口号集合
+ */
+function parseListeningPorts(output) {
+  const ports = new Set();
+  const lines = output.split('\n');
+  for (const line of lines) {
+    // 匹配格式如 "127.0.0.1:10001" 或 "*:10001" 或 ":::10001"
+    const match = line.match(/[\s:]+(\d+)\s/);
+    if (match) {
+      ports.add(parseInt(match[1], 10));
+    }
+  }
+  return ports;
+}
+
 module.exports = {
   syncAuthorizedKeys,
   validatePublicKey,
@@ -245,5 +380,9 @@ module.exports = {
   getUserKeys,
   getActualUserId,
   mergeFingerprints,
-  checkKeyExists
+  checkKeyExists,
+  allocateTunnelPort,
+  releaseTunnelPort,
+  getActiveTunnelPorts,
+  setCustomTunnelPort,
 };
