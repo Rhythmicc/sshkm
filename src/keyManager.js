@@ -339,10 +339,10 @@ function releaseTunnelPort(keyId, userId) {
  */
 function getActiveTunnelPorts() {
   return new Promise((resolve) => {
-    exec('ss -tlnp', (err, stdout, stderr) => {
-      console.log('[DEBUG] ss -tlnp err:', err ? err.message : null);
-      console.log('[DEBUG] ss -tlnp stderr:', stderr);
-      console.log('[DEBUG] ss -tlnp stdout:\n' + stdout);
+    exec('ss -tulpn | grep sshd', (err, stdout, stderr) => {
+      console.log('[DEBUG] ss -tulpn err:', err ? err.message : null);
+      console.log('[DEBUG] ss -tulpn stderr:', stderr);
+      console.log('[DEBUG] ss -tulpn stdout:\n' + stdout);
       if (err) {
         exec('netstat -tlnp 2>/dev/null || netstat -anp tcp 2>/dev/null', (err2, stdout2, stderr2) => {
           console.log('[DEBUG] netstat err:', err2 ? err2.message : null);
@@ -363,7 +363,7 @@ function getActiveTunnelPorts() {
 
 /**
  * 解析 ss/netstat 输出，提取 sshd 监听的端口号集合
- * ss 输出格式（-tlnp）：
+ * ss 输出格式（-tulpn）：
  *   tcp  LISTEN  0  128  0.0.0.0:6000  0.0.0.0:*  users:(("sshd",pid=...,fd=...))
  * - 有进程信息（root 运行）时只取 sshd 行，精确识别反向隧道
  * - 无进程信息（非 root）时取所有 LISTEN 行，由调用方的端口列表交集过滤
