@@ -17,6 +17,8 @@ module.exports = {
 
     // .ssh 目录权限（八进制）
     sshDirMode: 0o700,
+
+    sshUser: process.env.SSH_USER || 'jumpuser'
   },
 
   // 安全配置

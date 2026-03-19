@@ -4,6 +4,7 @@ let isAuthenticated = false;
 let activePorts = new Set(); // 当前活跃的隧道端口
 let tunnelPollTimer = null; // 轮询定时器
 let tunnelPortRange = { min: 20000, max: 29999 }; // 端口分配范围，登录后从服务器同步
+let tunnelSshUser = ''; // 跳板机 SSH 用户名，从服务器同步
 
 // 初始化
 document.addEventListener('DOMContentLoaded', async () => {
@@ -306,11 +307,12 @@ async function setCustomPort(keyId) {
  */
 function copyTunnelCmd(port) {
   const serverHost = window.location.hostname;
-  const cmd = `ssh -f -N -R ${port}:localhost:22 user@${serverHost}`;
+  const sshUser = tunnelSshUser || 'YOUR_SSH_USER';
+  const cmd = `ssh -f -N -R ${port}:localhost:22 ${sshUser}@${serverHost}`;
   navigator.clipboard.writeText(cmd).then(() => {
     showSuccess('add-success', `命令已复制：${cmd}`);
   }).catch(() => {
-    prompt('请手动复制以下命令：', `ssh -f -N -R ${port}:localhost:22 user@${serverHost}`);
+    prompt('请手动复制以下命令：', `ssh -f -N -R ${port}:localhost:22 ${sshUser}@${serverHost}`);
   });
 }
 
@@ -319,7 +321,7 @@ function copyTunnelCmd(port) {
  */
 function showTunnelGuide(port, comment) {
   const serverHost = window.location.hostname;
-  const sshUser = 'YOUR_SSH_USER'; // 用户需替换为实际着陆用户名
+  const sshUser = tunnelSshUser || 'YOUR_SSH_USER';
   const svcName = `ssh-tunnel-${port}`;
   const cmd = `ssh -f -N -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -R ${port}:localhost:22 ${sshUser}@${serverHost}`;
   const serviceContent = `[Unit]
@@ -332,7 +334,7 @@ Type=simple
 User=${sshUser}
 Restart=always
 RestartSec=30
-ExecStart=/usr/bin/ssh -f -N \\
+ExecStart=/usr/bin/ssh -N \\
   -o ServerAliveInterval=60 \\
   -o ServerAliveCountMax=3 \\
   -o ExitOnForwardFailure=yes \\
@@ -479,6 +481,7 @@ async function loadTunnelStatus(showFeedback = false) {
       activePorts = new Set(data.activePorts);
       // 同步端口范围
       if (data.portMin) tunnelPortRange = { min: data.portMin, max: data.portMax };
+      if (data.sshUser) tunnelSshUser = data.sshUser;
       // 更新已渲染公钥卡片中的状态指示（只更新 DOM，不重新渲染整个列表）
       document.querySelectorAll('.tunnel-status').forEach(el => {
         const portEl = el.closest('.tunnel-info').querySelector('.tunnel-port strong');
