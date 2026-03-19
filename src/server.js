@@ -14,6 +14,9 @@ const app = express();
 const PORT = config.server.port;
 const HOST = config.server.host;
 
+// 超管会话（内存存储，重启失效）
+const adminSessions = new Map();
+
 // 安全中间件
 app.use(helmet({
   contentSecurityPolicy: false // 为了加载外部指纹库
@@ -484,6 +487,204 @@ app.post('/api/tunnel/status', async (req, res) => {
     console.error(error);
     res.status(500).json({ error: '检测隧道状态失败' });
   }
+});
+
+/**
+ * 设置隔道公开状态（普通用户接口）
+ */
+app.post('/api/keys/set-public', async (req, res) => {
+  const { fingerprint, keyId, isPublic } = req.body;
+
+  if (!fingerprint || keyId == null || isPublic == null) {
+    return res.status(400).json({ error: '缺少必要参数' });
+  }
+
+  try {
+    const userId = await keyManager.getActualUserId(fingerprint);
+    if (!userId) return res.status(401).json({ error: '用户不存在' });
+
+    db.run(
+      'UPDATE ssh_keys SET is_public = ? WHERE id = ? AND user_id = ? AND tunnel_port IS NOT NULL',
+      [isPublic ? 1 : 0, keyId, userId],
+      function(err) {
+        if (err) return res.status(500).json({ error: '数据库错误' });
+        if (this.changes === 0) return res.status(400).json({ error: '公钥不存在、无权操作或未分配隔道端口' });
+        res.json({ success: true });
+      }
+    );
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: '操作失败' });
+  }
+});
+
+/**
+ * 获取所有公开隔道（需登录用户可访问）
+ */
+app.post('/api/tunnels/public', async (req, res) => {
+  const { fingerprint } = req.body;
+
+  if (!fingerprint) {
+    return res.status(400).json({ error: '缺少浏览器指纹' });
+  }
+
+  try {
+    const userId = await keyManager.getActualUserId(fingerprint);
+    if (!userId) return res.status(401).json({ error: '请先登录' });
+
+    db.all(
+      `SELECT k.id, k.user_id, k.comment, k.tunnel_port, k.created_at,
+              u.username, u.fingerprint AS user_fingerprint
+       FROM ssh_keys k
+       JOIN users u ON k.user_id = u.id
+       WHERE k.is_public = 1 AND k.tunnel_port IS NOT NULL
+       ORDER BY k.user_id, k.created_at DESC`,
+      [],
+      async (err, rows) => {
+        if (err) return res.status(500).json({ error: '数据库错误' });
+        try {
+          const listeningPorts = await keyManager.getActiveTunnelPorts();
+          const result = rows.map(r => ({
+            ...r,
+            tunnel_active: listeningPorts.has(r.tunnel_port)
+          }));
+          res.json({ tunnels: result });
+        } catch (e) {
+          res.json({ tunnels: rows.map(r => ({ ...r, tunnel_active: false })) });
+        }
+      }
+    );
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: '获取失败' });
+  }
+});
+
+// ==================== 超管 API 路由 ====================
+
+/**
+ * 超管登录
+ */
+app.post('/api/admin/login', (req, res) => {
+  const { token } = req.body;
+
+  if (!token) {
+    return res.status(400).json({ error: '缺少令牌' });
+  }
+
+  const adminToken = config.admin && config.admin.token;
+  if (!adminToken) {
+    return res.status(503).json({ error: '超管功能未启用，请设置 ADMIN_TOKEN 环境变量' });
+  }
+
+  if (token !== adminToken) {
+    return res.status(401).json({ error: '超管令牌错误' });
+  }
+
+  // 生成会话 token
+  const sessionToken = crypto.randomBytes(32).toString('hex');
+  adminSessions.set(sessionToken, Date.now());
+
+  // 清理超过 24 小时的过期会话
+  for (const [k, v] of adminSessions) {
+    if (Date.now() - v > 24 * 60 * 60 * 1000) adminSessions.delete(k);
+  }
+
+  res.json({ success: true, sessionToken });
+});
+
+/**
+ * 验证超管会话中间件
+ */
+function requireAdminSession(req, res, next) {
+  const sessionToken = req.body.sessionToken;
+  if (!sessionToken || !adminSessions.has(sessionToken)) {
+    return res.status(401).json({ error: '超管会话无效，请重新登录' });
+  }
+  next();
+}
+
+/**
+ * 获取所有用户的公钥和隧道状态（超管接口）
+ */
+app.post('/api/admin/all-keys', requireAdminSession, async (req, res) => {
+  try {
+    const keys = await new Promise((resolve, reject) => {
+      db.all(
+        `SELECT k.id, k.user_id, k.fingerprint, k.public_key, k.comment,
+                k.created_at, k.tunnel_port, k.is_public,
+                u.fingerprint AS user_fingerprint, u.username
+         FROM ssh_keys k
+         JOIN users u ON k.user_id = u.id
+         ORDER BY k.user_id, k.created_at DESC`,
+        [],
+        (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows);
+        }
+      );
+    });
+
+    // 获取活跃隧道端口
+    const listeningPorts = await keyManager.getActiveTunnelPorts();
+
+    const result = keys.map(k => ({
+      ...k,
+      tunnel_active: k.tunnel_port != null ? listeningPorts.has(k.tunnel_port) : false,
+    }));
+
+    res.json({ keys: result });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: '获取数据失败' });
+  }
+});
+
+/**
+ * 为用户设置可读用户名（超管接口）
+ */
+app.post('/api/admin/rename-user', requireAdminSession, (req, res) => {
+  const { userId, username } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ error: '缺少必要参数' });
+  }
+
+  const trimmed = typeof username === 'string' ? username.trim().slice(0, 50) : '';
+
+  db.run(
+    'UPDATE users SET username = ? WHERE id = ?',
+    [trimmed || null, userId],
+    function(err) {
+      if (err) return res.status(500).json({ error: '数据库错误' });
+      if (this.changes === 0) return res.status(404).json({ error: '用户不存在' });
+      res.json({ success: true });
+    }
+  );
+});
+
+/**
+ * 删除指定公钥（超管接口）
+ */
+app.post('/api/admin/delete-key', requireAdminSession, async (req, res) => {
+  const { keyId } = req.body;
+
+  if (!keyId) {
+    return res.status(400).json({ error: '缺少必要参数' });
+  }
+
+  db.run('DELETE FROM ssh_keys WHERE id = ?', [keyId], async function(err) {
+    if (err) return res.status(500).json({ error: '数据库错误' });
+    if (this.changes === 0) return res.status(404).json({ error: '公钥不存在' });
+
+    try {
+      await keyManager.syncAuthorizedKeys();
+      res.json({ success: true });
+    } catch (e) {
+      console.error('同步 authorized_keys 失败:', e);
+      res.status(500).json({ error: '公钥已删除，但同步文件失败' });
+    }
+  });
 });
 
 // ==================== 启动服务器 ====================

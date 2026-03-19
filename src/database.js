@@ -66,6 +66,20 @@ db.serialize(() => {
   // tunnel_port 唯一索引（允许 NULL 重复，实际由应用层保证非空时唯一）
   db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tunnel_port ON ssh_keys(tunnel_port)
     WHERE tunnel_port IS NOT NULL`);
+
+  // === 数据迁移：为 users 增加 username 列（兼容已有数据库）===
+  db.run(`ALTER TABLE users ADD COLUMN username TEXT NULL`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error('迁移 username 列失败:', err.message);
+    }
+  });
+
+  // === 数据迁移：为 ssh_keys 增加 is_public 列（兼容已有数据库）===
+  db.run(`ALTER TABLE ssh_keys ADD COLUMN is_public INTEGER DEFAULT 0`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error('迁移 is_public 列失败:', err.message);
+    }
+  });
 });
 
 module.exports = db;

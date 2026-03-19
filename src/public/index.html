@@ -21,7 +21,37 @@
           <input type="text" id="token-input" placeholder="000000" maxlength="6" pattern="[0-9]*" inputmode="numeric">
           <button id="verify-btn" class="btn btn-primary">验证并登录</button>
           <div id="auth-error" class="error-message"></div>
+          <div class="admin-entry">
+            <button id="admin-entry-btn" class="btn-link">🔒 超管入口</button>
+          </div>
         </div>
+
+        <!-- 超管登录 -->
+        <div id="admin-login-section" style="display:none;">
+          <h2>🛡️ 超管登录</h2>
+          <p class="hint">输入管理员令牌以访问超管视图</p>
+          <input type="password" id="admin-token-input" placeholder="管理员令牌" autocomplete="off">
+          <button id="admin-verify-btn" class="btn btn-admin">进入超管</button>
+          <div id="admin-auth-error" class="error-message"></div>
+          <div class="admin-entry">
+            <button id="admin-back-btn" class="btn-link">← 返回普通登录</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 超管仪表板 -->
+    <div id="admin-page" class="page" style="display: none;">
+      <div class="header admin-header">
+        <h1>🛡️ 超管视图</h1>
+        <div class="header-actions">
+          <button id="admin-refresh-btn" class="btn btn-secondary btn-sm">⟳ 刷新</button>
+          <button id="admin-logout-btn" class="btn btn-secondary">退出超管</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="admin-stats" id="admin-stats"></div>
+        <div id="admin-keys-list"></div>
       </div>
     </div>
 
@@ -56,6 +86,16 @@
           <button id="refresh-status-btn" class="btn btn-secondary btn-sm" title="刷新隧道状态">⟳ 刷新状态</button>
         </div>
         <div id="keys-list"></div>
+      </div>
+
+      <!-- 公开隧道 -->
+      <div class="card">
+        <div class="keys-list-header">
+          <h2>🌐 公开隧道</h2>
+          <button id="refresh-public-tunnels-btn" class="btn btn-secondary btn-sm" title="刷新公开隧道">⟳ 刷新</button>
+        </div>
+        <p class="hint">其他用户公开分享的 SSH 反向隧道，点击复制连接命令后将 &lt;对方用户名&gt; 替换为实际值即可使用</p>
+        <div id="public-tunnels-list"></div>
       </div>
     </div>
   </div>
