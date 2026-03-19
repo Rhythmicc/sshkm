@@ -60,6 +60,10 @@ function setupEventListeners() {
   // 退出登录
   document.getElementById('logout-btn').addEventListener('click', logout);
 
+  // 中继模块
+  document.getElementById('relay-refresh-btn').addEventListener('click', loadRelay);
+  document.getElementById('relay-create-client-btn').addEventListener('click', createRelayClient);
+
   // 超管入口
   document.getElementById('admin-entry-btn').addEventListener('click', () => {
     document.getElementById('login-section').style.display = 'none';
@@ -149,6 +153,7 @@ function showManagePage() {
   document.getElementById('auth-page').style.display = 'none';
   document.getElementById('manage-page').style.display = 'block';
   loadKeys();
+  loadRelay();
   // 启动隧道状态轮询（10 秒一次）
   startTunnelPolling();
 }
@@ -390,6 +395,8 @@ WantedBy=multi-user.target`;
         <pre class="code-block" id="guide-cmd">${escapeHtml(cmd)}</pre>
         <button class="btn btn-copy guide-copy-btn" onclick="copyText('guide-cmd')">📋 复制</button>
       </div>
+      <p class="guide-note">&#10071; <strong>端口冲突提示</strong>：系统已在服务器端通过 <code>permitlisten</code> 限制，每个公钥只能在其分配的端口（<strong>${port}</strong>）上建立反向隧道。若您在命令中使用了其他端口，SSH 将提示 <em>"Warning: remote port forwarding failed for listen port XXXX"</em>，请确认命令中的端口号与此处一致。</p>
+
       <p class="guide-note">成功后，页面左上角状态标志将变为 <span class="badge-active">隧道活跃</span>。</p>
     </div>
 
@@ -708,6 +715,215 @@ function formatDate(dateString) {
   });
 }
 
+// ==================== NAT 穿透 / Relay 中继 ====================
+
+/**
+ * 加载中继客户端和转发规则
+ */
+async function loadRelay() {
+  const clientsEl = document.getElementById('relay-clients-list');
+  const rulesEl = document.getElementById('relay-rules-list');
+  clientsEl.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+  rulesEl.innerHTML = '';
+
+  try {
+    const [clientsResp, rulesResp] = await Promise.all([
+      fetch('/api/relay/clients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fingerprint: visitorId })
+      }),
+      fetch('/api/relay/rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fingerprint: visitorId })
+      }),
+    ]);
+
+    const clientsData = await clientsResp.json();
+    const rulesData = await rulesResp.json();
+
+    renderRelayClients(clientsData.clients || []);
+    renderRelayRules(rulesData.rules || [], rulesData.status || {});
+  } catch (e) {
+    clientsEl.innerHTML = '<div class="error-message show">加载失败，请重试</div>';
+  }
+}
+
+/**
+ * 渲染中继客户端列表
+ */
+function renderRelayClients(clients) {
+  const el = document.getElementById('relay-clients-list');
+  if (clients.length === 0) {
+    el.innerHTML = '<p class="hint">暂无中继客户端，点击上方按钮创建。</p>';
+    return;
+  }
+  el.innerHTML = clients.map(c => `
+    <div class="relay-client-item">
+      <div class="relay-client-header">
+        <span class="relay-client-name">🖥️ ${escapeHtml(c.name || '未命名客户端 #' + c.id)}</span>
+        <span class="relay-client-rules">${c.rule_count} 条规则</span>
+        <button class="btn btn-sm" onclick="addRelayRule(${c.id}, '${escapeJs(c.name || '')}')">＋ 添加规则</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteRelayClient(${c.id})">删除</button>
+      </div>
+      <div class="relay-token-row">
+        <code class="relay-token" id="relay-token-${c.id}">${escapeHtml(c.token)}</code>
+        <button class="btn-link" onclick="copyRelayToken('${escapeJs(c.token)}')">📋 复制 token</button>
+      </div>
+      ${c.last_seen ? `<div class="key-date">最近在线: ${formatDate(c.last_seen)}</div>` : '<div class="key-date">从未连接</div>'}
+    </div>
+  `).join('');
+}
+
+/**
+ * 渲染转发规则列表
+ */
+function renderRelayRules(rules, status) {
+  const el = document.getElementById('relay-rules-list');
+  if (rules.length === 0) {
+    el.innerHTML = '<p class="hint">暂无转发规则。创建中继客户端后即可添加 TCP/UDP 规则。</p>';
+    return;
+  }
+  const activeTcp = new Set(status.activeTcpPorts || []);
+  const activeUdp = new Set(status.activeUdpPorts || []);
+
+  el.innerHTML = rules.map(r => {
+    const isActive = r.protocol === 'tcp' ? activeTcp.has(r.listen_port)
+                   : r.protocol === 'udp' ? activeUdp.has(r.listen_port) : false;
+    return `
+      <div class="relay-rule-item">
+        <div class="relay-rule-header">
+          <span class="relay-rule-proto relay-proto-${r.protocol}">${r.protocol.toUpperCase()}</span>
+          <span class="relay-rule-name">${escapeHtml(r.name || '转发规则 #' + r.id)}</span>
+          <span class="tunnel-status ${isActive ? 'active' : 'inactive'} badge-inline">
+            <span class="status-dot"></span>${isActive ? '活跃' : '离线'}
+          </span>
+          <button class="btn btn-danger btn-sm" onclick="deleteRelayRule(${r.id})">删除</button>
+        </div>
+        <div class="relay-rule-detail">
+          <span>监听端口 <strong>${r.listen_port}</strong></span>
+          <span>→ ${escapeHtml(r.target_host || 'localhost')}${r.target_port ? ':' + r.target_port : ''}</span>
+          ${r.client_name ? `<span class="relay-client-tag">客户端: ${escapeHtml(r.client_name)}</span>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+/**
+ * 创建中继客户端
+ */
+async function createRelayClient() {
+  const nameInput = document.getElementById('relay-client-name');
+  const name = nameInput.value.trim();
+  try {
+    const resp = await fetch('/api/relay/clients/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fingerprint: visitorId, name })
+    });
+    const data = await resp.json();
+    if (resp.ok && data.success) {
+      nameInput.value = '';
+      loadRelay();
+      alert(`中继客户端已创建！\n\nToken（请妥善保存，仅显示一次）:\n${data.token}`);
+    } else {
+      alert(data.error || '创建失败');
+    }
+  } catch (e) {
+    alert('创建失败，请重试');
+  }
+}
+
+/**
+ * 删除中继客户端
+ */
+async function deleteRelayClient(clientId) {
+  if (!confirm('确定要删除该中继客户端？其所有转发规则也将一并删除。')) return;
+  try {
+    const resp = await fetch('/api/relay/clients/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fingerprint: visitorId, clientId })
+    });
+    const data = await resp.json();
+    if (resp.ok && data.success) loadRelay();
+    else alert(data.error || '删除失败');
+  } catch (e) {
+    alert('删除失败，请重试');
+  }
+}
+
+/**
+ * 为中继客户端添加转发规则
+ */
+async function addRelayRule(clientId, clientName) {
+  const protocol = prompt(`为客户端「${clientName || '#' + clientId}」添加规则\n协议（tcp 或 udp）：`, 'tcp');
+  if (!protocol) return;
+  if (!['tcp', 'udp'].includes(protocol.toLowerCase())) {
+    alert('协议必须是 tcp 或 udp');
+    return;
+  }
+  const targetPort = prompt('目标端口（转发到客户端本机的哪个端口）：', '22');
+  if (!targetPort) return;
+  const name = prompt('规则名称（可选）：', '');
+
+  try {
+    const resp = await fetch('/api/relay/rules/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fingerprint: visitorId,
+        relayClientId: clientId,
+        protocol: protocol.toLowerCase(),
+        targetPort: parseInt(targetPort, 10),
+        name: name || null,
+      })
+    });
+    const data = await resp.json();
+    if (resp.ok && data.success) {
+      loadRelay();
+      alert(`规则已创建！\n已分配端口：${data.port}`);
+    } else {
+      alert(data.error || '创建失败');
+    }
+  } catch (e) {
+    alert('创建失败，请重试');
+  }
+}
+
+/**
+ * 删除转发规则
+ */
+async function deleteRelayRule(ruleId) {
+  if (!confirm('确定要删除该转发规则？')) return;
+  try {
+    const resp = await fetch('/api/relay/rules/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fingerprint: visitorId, ruleId })
+    });
+    const data = await resp.json();
+    if (resp.ok && data.success) loadRelay();
+    else alert(data.error || '删除失败');
+  } catch (e) {
+    alert('删除失败，请重试');
+  }
+}
+
+/**
+ * 复制中继客户端 token
+ */
+function copyRelayToken(token) {
+  navigator.clipboard.writeText(token).then(() => {
+    showSuccess('add-success', 'Token 已复制！请妥善保存，不要泄露给他人。');
+  }).catch(() => {
+    prompt('请手动复制 Token：', token);
+  });
+}
+
+
 // ==================== 超管功能 ====================
 
 /**
@@ -822,7 +1038,7 @@ async function loadAdminKeys() {
     const groups = {};
     for (const k of keys) {
       if (!groups[k.user_id]) {
-        groups[k.user_id] = { fingerprint: k.user_fingerprint, keys: [] };
+        groups[k.user_id] = { fingerprint: k.user_fingerprint, displayName: k.display_name, keys: [] };
       }
       groups[k.user_id].keys.push(k);
     }
@@ -830,7 +1046,8 @@ async function loadAdminKeys() {
     listEl.innerHTML = Object.entries(groups).map(([userId, group]) => `
       <div class="admin-user-group">
         <div class="admin-user-header">
-          <span class="admin-user-label">👤 用户 #${userId}</span>
+          <span class="admin-user-label">&#128100; ${escapeHtml(group.displayName || ('用户 #' + userId))}</span>
+          <button class="btn-link btn-icon" title="重命名用户" onclick="adminRenameUser(${userId}, '${escapeJs(group.displayName || '')}')">&#9998;</button>
           <span class="admin-user-fp" title="${escapeHtml(group.fingerprint)}">指纹: ${escapeHtml(group.fingerprint.slice(0, 12))}…</span>
           <span class="admin-user-count">${group.keys.length} 个公钥</span>
         </div>
@@ -862,9 +1079,62 @@ function renderAdminKeyItem(key) {
           <div class="key-comment">${escapeHtml(key.comment || '无备注')}</div>
           <div class="key-date">添加时间: ${formatDate(key.created_at)}</div>
         </div>
-        ${tunnelBadge}
+        <div class="admin-key-actions">
+          ${tunnelBadge}
+          <button class="btn btn-danger btn-sm" onclick="adminDeleteKey(${key.id})">删除</button>
+        </div>
       </div>
       <div class="key-content">${escapeHtml(key.public_key)}</div>
     </div>
   `;
 }
+
+/**
+ * 超管：删除公钥
+ */
+async function adminDeleteKey(keyId) {
+  if (!confirm('确定要删除该公钥？此操作不可撤销。')) return;
+  try {
+    const response = await fetch('/api/admin/delete-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionToken: adminSessionToken, keyId })
+    });
+    const data = await response.json();
+    if (response.status === 401) { adminLogout(); return; }
+    if (response.ok && data.success) {
+      loadAdminKeys();
+    } else {
+      alert(data.error || '删除失败');
+    }
+  } catch (error) {
+    console.error('超管删除公钥失败:', error);
+    alert('删除失败，请重试');
+  }
+}
+
+/**
+ * 超管：重命名用户
+ */
+async function adminRenameUser(userId, currentName) {
+  const newName = prompt(`修改用户 #${userId} 的显示名（留空可清除）：`, currentName || '');
+  if (newName === null) return; // 取消
+  try {
+    const response = await fetch('/api/admin/rename-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionToken: adminSessionToken, userId, displayName: newName })
+    });
+    const data = await response.json();
+    if (response.status === 401) { adminLogout(); return; }
+    if (response.ok && data.success) {
+      loadAdminKeys();
+    } else {
+      alert(data.error || '重命名失败');
+    }
+  } catch (error) {
+    console.error('超管重命名失败:', error);
+    alert('重命名失败，请重试');
+  }
+}
+

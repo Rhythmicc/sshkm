@@ -11,8 +11,8 @@ const AUTHORIZED_KEYS_PATH = config.ssh.authorizedKeysPath;
  */
 function syncAuthorizedKeys() {
   return new Promise((resolve, reject) => {
-    // 获取所有公钥
-    db.all('SELECT public_key, comment FROM ssh_keys ORDER BY id', [], (err, rows) => {
+    // 获取所有公钥（含已分配的隧道端口，用于生成 permitlisten 限制）
+    db.all('SELECT public_key, comment, tunnel_port FROM ssh_keys ORDER BY id', [], (err, rows) => {
       if (err) {
         console.error('数据库查询错误:', err);
         return reject(err);
@@ -26,9 +26,11 @@ function syncAuthorizedKeys() {
         }
 
         // 生成文件内容
+        // 已分配端口的公钥加上 permitlisten="PORT"，只允许在该端口上建立反向隧道，防止端口冲突
         const content = rows.map(row => {
           const comment = row.comment ? ` ${row.comment}` : '';
-          return `${row.public_key}${comment}`;
+          const options = row.tunnel_port ? `permitlisten="${row.tunnel_port}" ` : '';
+          return `${options}${row.public_key}${comment}`;
         }).join('\n');
 
         // 写入文件
@@ -272,7 +274,10 @@ function allocateTunnelPort(keyId, userId) {
           function(err) {
             if (err) return reject(err);
             if (this.changes === 0) return reject(new Error('公钥不存在或无权操作'));
-            resolve(assignedPort);
+            // 重新同步 authorized_keys，使 permitlisten 生效
+            syncAuthorizedKeys()
+              .then(() => resolve(assignedPort))
+              .catch(() => resolve(assignedPort)); // 端口已分配，同步失败不影响返回
           }
         );
       }
@@ -309,7 +314,8 @@ function setCustomTunnelPort(keyId, userId, port) {
             if (this.changes === 0) {
               return reject(new Error('公钥不存在、无权操作或已分配了端口'));
             }
-            resolve();
+            // 重新同步 authorized_keys，使 permitlisten 生效
+            syncAuthorizedKeys().then(resolve).catch(resolve);
           }
         );
       }
@@ -328,6 +334,37 @@ function releaseTunnelPort(keyId, userId) {
       function(err) {
         if (err) return reject(err);
         if (this.changes === 0) return reject(new Error('公钥不存在或无权操作'));
+        // 重新同步 authorized_keys，移除 permitlisten 限制
+        syncAuthorizedKeys().then(resolve).catch(resolve);
+      }
+    );
+  });
+}
+
+/**
+ * 超管：删除任意公钥（无所有权检查）
+ */
+function adminDeleteKey(keyId) {
+  return new Promise((resolve, reject) => {
+    db.run('DELETE FROM ssh_keys WHERE id = ?', [keyId], function(err) {
+      if (err) return reject(err);
+      if (this.changes === 0) return reject(new Error('公钥不存在'));
+      syncAuthorizedKeys().then(resolve).catch(reject);
+    });
+  });
+}
+
+/**
+ * 超管：设置用户显示名称
+ */
+function setUserDisplayName(userId, displayName) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      'UPDATE users SET display_name = ? WHERE id = ?',
+      [displayName && displayName.trim() ? displayName.trim() : null, userId],
+      function(err) {
+        if (err) return reject(err);
+        if (this.changes === 0) return reject(new Error('用户不存在'));
         resolve();
       }
     );
@@ -407,4 +444,6 @@ module.exports = {
   releaseTunnelPort,
   getActiveTunnelPorts,
   setCustomTunnelPort,
+  adminDeleteKey,
+  setUserDisplayName,
 };

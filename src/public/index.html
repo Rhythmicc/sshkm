@@ -87,6 +87,28 @@
         </div>
         <div id="keys-list"></div>
       </div>
+
+      <!-- NAT 穿透 / TCP·UDP 中继 -->
+      <div class="card">
+        <div class="keys-list-header">
+          <h2>🌐 TCP / UDP 中继</h2>
+          <button id="relay-refresh-btn" class="btn btn-secondary btn-sm">⟳ 刷新</button>
+        </div>
+        <p class="hint" style="margin-bottom:12px;">通过轻量中继客户端（非 SSH）穿透 TCP 或 UDP 端口，适用于 SSH 隧道无法覆盖的 UDP 协议场景。</p>
+
+        <!-- 创建中继客户端 -->
+        <div class="relay-create-row">
+          <input type="text" id="relay-client-name" placeholder="客户端名称（可选）" style="flex:1;margin-bottom:0;">
+          <button id="relay-create-client-btn" class="btn btn-primary btn-sm">＋ 创建客户端</button>
+        </div>
+        <div id="relay-clients-list" style="margin-top:12px;"></div>
+
+        <!-- 转发规则列表 -->
+        <div style="margin-top:16px;">
+          <h3 style="color:#444;font-size:15px;margin-bottom:8px;">📋 转发规则</h3>
+          <div id="relay-rules-list"></div>
+        </div>
+      </div>
     </div>
   </div>
 

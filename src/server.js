@@ -6,9 +6,11 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const crypto = require('crypto');
+const net = require('net');
 const config = require('./config');
 const db = require('./database');
 const keyManager = require('./keyManager');
+const relayManager = require('./relayManager');
 
 const app = express();
 const PORT = config.server.port;
@@ -541,7 +543,8 @@ app.post('/api/admin/all-keys', requireAdminSession, async (req, res) => {
     const keys = await new Promise((resolve, reject) => {
       db.all(
         `SELECT k.id, k.user_id, k.fingerprint, k.public_key, k.comment,
-                k.created_at, k.tunnel_port, u.fingerprint AS user_fingerprint
+                k.created_at, k.tunnel_port, u.fingerprint AS user_fingerprint,
+                u.display_name
          FROM ssh_keys k
          JOIN users u ON k.user_id = u.id
          ORDER BY k.user_id, k.created_at DESC`,
@@ -565,6 +568,241 @@ app.post('/api/admin/all-keys', requireAdminSession, async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: '获取数据失败' });
+  }
+});
+
+/**
+ * 超管：删除任意公钥
+ */
+app.post('/api/admin/delete-key', requireAdminSession, async (req, res) => {
+  const { keyId } = req.body;
+  if (!keyId) return res.status(400).json({ error: '缺少 keyId' });
+  try {
+    await keyManager.adminDeleteKey(keyId);
+    res.json({ success: true });
+  } catch (error) {
+    console.error(error);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+/**
+ * 超管：设置用户显示名
+ */
+app.post('/api/admin/rename-user', requireAdminSession, async (req, res) => {
+  const { userId, displayName } = req.body;
+  if (!userId) return res.status(400).json({ error: '缺少 userId' });
+  if (displayName && displayName.length > 50) {
+    return res.status(400).json({ error: '显示名最多 50 个字符' });
+  }
+  try {
+    await keyManager.setUserDisplayName(userId, displayName);
+    res.json({ success: true });
+  } catch (error) {
+    console.error(error);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// ==================== NAT 穿透 / Relay API ====================
+
+/**
+ * 验证用户身份的中间件（基于 fingerprint）
+ */
+async function requireUser(req, res, next) {
+  const { fingerprint } = req.body;
+  if (!fingerprint) return res.status(400).json({ error: '缺少浏览器指纹' });
+  try {
+    const userId = await keyManager.getActualUserId(fingerprint);
+    if (!userId) return res.status(401).json({ error: '用户不存在，请先添加公钥' });
+    req.userId = userId;
+    next();
+  } catch (e) {
+    res.status(500).json({ error: '身份验证失败' });
+  }
+}
+
+/**
+ * 获取用户的中继客户端列表
+ */
+app.post('/api/relay/clients', requireUser, async (req, res) => {
+  try {
+    const clients = await relayManager.getUserRelayClients(req.userId);
+    res.json({ clients });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * 创建中继客户端（返回 token，客户端用此 token 建立控制通道）
+ */
+app.post('/api/relay/clients/create', requireUser, async (req, res) => {
+  const { name } = req.body;
+  try {
+    const client = await relayManager.createRelayClient(req.userId, name);
+    res.json({ success: true, ...client });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * 删除中继客户端
+ */
+app.post('/api/relay/clients/delete', requireUser, async (req, res) => {
+  const { clientId } = req.body;
+  if (!clientId) return res.status(400).json({ error: '缺少 clientId' });
+  try {
+    await relayManager.deleteRelayClient(clientId, req.userId);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+/**
+ * 获取用户的转发规则列表
+ */
+app.post('/api/relay/rules', requireUser, async (req, res) => {
+  try {
+    const rules = await relayManager.getUserRelayRules(req.userId);
+    const status = relayManager.getRelayStatus();
+    res.json({ rules, status });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * 创建转发规则（分配端口）
+ */
+app.post('/api/relay/rules/create', requireUser, async (req, res) => {
+  const { relayClientId, protocol, targetHost, targetPort, name } = req.body;
+  const proto = protocol || 'tcp';
+  if (!['tcp', 'udp'].includes(proto)) {
+    return res.status(400).json({ error: '协议必须是 tcp 或 udp' });
+  }
+  try {
+    const result = await relayManager.createRelayRule({
+      userId: req.userId,
+      relayClientId: relayClientId || null,
+      protocol: proto,
+      targetHost: targetHost || 'localhost',
+      targetPort: targetPort ? parseInt(targetPort, 10) : null,
+      name,
+    });
+    res.json({ success: true, ...result });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+/**
+ * 删除转发规则
+ */
+app.post('/api/relay/rules/delete', requireUser, async (req, res) => {
+  const { ruleId } = req.body;
+  if (!ruleId) return res.status(400).json({ error: '缺少 ruleId' });
+  try {
+    await relayManager.deleteRelayRule(ruleId, req.userId);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+/**
+ * 中继客户端控制通道（TCP 长连接，客户端用 token 鉴权）
+ * 路径：/relay/connect
+ * 客户端先发一行 JSON: {"token": "..."}
+ * 之后双方通过换行分隔的 JSON 消息通信
+ */
+app.get('/relay/connect', (req, res) => {
+  // 升级到原始 TCP socket（HTTP 长连接）
+  res.writeHead(200, {
+    'Content-Type': 'application/octet-stream',
+    'Transfer-Encoding': 'chunked',
+    'Connection': 'keep-alive',
+    'X-Relay': 'control-channel',
+  });
+  res.flushHeaders();
+
+  const socket = req.socket;
+  socket.setTimeout(0);
+  socket.setKeepAlive(true, 15000);
+
+  let authenticated = false;
+  let buf = '';
+
+  socket.on('data', async (chunk) => {
+    buf += chunk.toString();
+    const lines = buf.split('\n');
+    buf = lines.pop(); // 保留最后一个不完整行
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      let msg;
+      try { msg = JSON.parse(line); } catch { continue; }
+
+      if (!authenticated) {
+        // 第一条消息必须是鉴权
+        if (msg.type === 'AUTH' && msg.token) {
+          try {
+            await relayManager.registerClient(msg.token, socket);
+            authenticated = true;
+            relayManager.sendControl(socket, { type: 'AUTH_OK' });
+          } catch (e) {
+            relayManager.sendControl(socket, { type: 'AUTH_FAIL', reason: e.message });
+            socket.destroy();
+          }
+        }
+        continue;
+      }
+
+      // 已鉴权，处理后续消息
+      const clientEntry = [...relayManager.relayClients.values()]
+        .find(c => c.controlSocket === socket);
+      if (!clientEntry) continue;
+
+      if (msg.type === 'PING') {
+        relayManager.sendControl(socket, { type: 'PONG', ts: Date.now() });
+      }
+
+      // 客户端告知数据通道就绪（DATA_CHAN: { connId, dataPort }）
+      if (msg.type === 'DATA_CHAN' && msg.connId && clientEntry.pendingChannels) {
+        const resolve = clientEntry.pendingChannels.get(msg.connId);
+        if (resolve) {
+          clientEntry.pendingChannels.delete(msg.connId);
+          // 客户端在 dataPort 上监听，我们向其发起连接
+          const dataConn = net.createConnection(msg.dataPort, '127.0.0.1');
+          dataConn.once('connect', () => resolve(dataConn));
+          dataConn.once('error', () => {
+            const r = clientEntry.pendingChannels.get(msg.connId);
+            if (r) r(null);
+          });
+        }
+      }
+
+      // UDP 回包（UDP_REPLY: { port, to: {address, port}, data: base64 }）
+      if (msg.type === 'UDP_REPLY' && msg.port && msg.to && msg.data) {
+        const key = `${msg.to.address}:${msg.to.port}`;
+        const replyFn = clientEntry.udpReplyListeners && clientEntry.udpReplyListeners.get(key);
+        if (replyFn) replyFn(msg.data);
+      }
+    }
+  });
+});
+
+// ==================== 超管：relay 状态 ====================
+
+app.post('/api/admin/relay-status', requireAdminSession, async (req, res) => {
+  try {
+    const status = relayManager.getRelayStatus();
+    const rules = await relayManager.adminGetAllRules();
+    res.json({ status, rules });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 

@@ -693,6 +693,122 @@ code {
   }
 }
 
+/* ==================== NAT 穿透 / Relay 中继样式 ==================== */
+
+.relay-create-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.relay-client-item {
+  background: #f8f9fa;
+  border: 2px solid #e9ecef;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.relay-client-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.relay-client-name {
+  font-weight: 600;
+  color: #2d3748;
+  flex: 1;
+  min-width: 100px;
+}
+
+.relay-client-rules {
+  font-size: 12px;
+  background: #dee2e6;
+  color: #495057;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.relay-token-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.relay-token {
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 11px;
+  background: white;
+  border: 1px solid #dee2e6;
+  padding: 4px 8px;
+  border-radius: 4px;
+  word-break: break-all;
+  flex: 1;
+  color: #666;
+}
+
+.relay-rule-item {
+  background: #fff;
+  border: 1px solid #e9ecef;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.relay-rule-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.relay-rule-proto {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+.relay-proto-tcp {
+  background: #cce5ff;
+  color: #004085;
+}
+
+.relay-proto-udp {
+  background: #d4edda;
+  color: #155724;
+}
+
+.relay-rule-name {
+  flex: 1;
+  font-weight: 500;
+  color: #333;
+  font-size: 14px;
+}
+
+.relay-rule-detail {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  color: #6c757d;
+  flex-wrap: wrap;
+}
+
+.relay-client-tag {
+  background: #f0f0f8;
+  color: #667eea;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
 /* ==================== 超管入口样式 ==================== */
 
 .admin-entry {
@@ -837,6 +953,32 @@ code {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+.admin-key-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-icon {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 15px;
+  padding: 2px 4px;
+  color: #6c757d;
+  border-radius: 4px;
+  transition: color 0.2s, background 0.2s;
+  line-height: 1;
+}
+
+.btn-icon:hover {
+  color: #667eea;
+  background: #f0f0f8;
+  transform: none;
+  box-shadow: none;
 }
 
 @media (max-width: 600px) {

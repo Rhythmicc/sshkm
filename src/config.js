@@ -49,6 +49,19 @@ module.exports = {
     pollIntervalMs: parseInt(process.env.TUNNEL_POLL_INTERVAL_MS || '10000', 10),
   },
 
+  // NAT 穿透中继配置
+  relay: {
+    // 是否启用 TCP 中继（纯 Node.js 实现，不依赖 SSH）
+    tcpEnabled: process.env.RELAY_TCP_ENABLED !== 'false',
+    // 是否启用 UDP 中继
+    udpEnabled: process.env.RELAY_UDP_ENABLED === 'true',
+    // TCP/UDP 中继端口范围（与 SSH 隧道共用同一资源池时，需避免重叠）
+    portMin: parseInt(process.env.RELAY_PORT_MIN || process.env.TUNNEL_MIN_PORT || '6000', 10),
+    portMax: parseInt(process.env.RELAY_PORT_MAX || process.env.TUNNEL_MAX_PORT || '6100', 10),
+    // 中继客户端心跳超时（毫秒），超时后视为离线
+    clientTimeoutMs: parseInt(process.env.RELAY_CLIENT_TIMEOUT_MS || '30000', 10),
+  },
+
   // 超管配置
   admin: {
     // 超管访问令牌，从环境变量读取（未设置则禁用超管入口）
