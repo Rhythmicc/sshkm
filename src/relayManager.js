@@ -211,9 +211,20 @@ function startTcpRelayServer(port, clientToken) {
       return;
     }
 
-    // 通知客户端新连接到来（发送控制消息：NEW_CONN <connId>）
+    // 查询该端口对应的规则，获取 target_port（客户端需要知道应连接本地哪个端口）
+    const rule = await dbGet(
+      'SELECT target_port, target_host FROM relay_rules WHERE listen_port = ?',
+      [port]
+    ).catch(() => null);
+
     const connId = crypto.randomBytes(8).toString('hex');
-    sendControl(client.controlSocket, { type: 'NEW_CONN', connId, port });
+    sendControl(client.controlSocket, {
+      type: 'NEW_CONN',
+      connId,
+      listenPort: port,
+      targetPort: rule ? rule.target_port : null,
+      targetHost: rule ? rule.target_host : 'localhost',
+    });
 
     // 等待客户端建立数据通道（超时 10s）
     const dataChannel = await waitForDataChannel(client, connId, 10000).catch(() => null);
@@ -317,7 +328,7 @@ function sendControl(socket, msg) {
 
 /**
  * 等待客户端为 connId 建立数据通道
- * （客户端通过控制通道发送 DATA_CHAN 消息，携带 connId 和新 TCP 连接的端口）
+ * 客户端收到 NEW_CONN 消息后主动连入 /relay/data，服务端调用 resolveDataChannel 触发此处 resolve
  */
 function waitForDataChannel(client, connId, timeoutMs) {
   return new Promise((resolve, reject) => {
@@ -329,9 +340,33 @@ function waitForDataChannel(client, connId, timeoutMs) {
     if (!client.pendingChannels) client.pendingChannels = new Map();
     client.pendingChannels.set(connId, (socket) => {
       clearTimeout(timer);
-      resolve(socket);
+      if (socket) resolve(socket);
+      else reject(new Error('数据通道连接失败'));
     });
   });
+}
+
+/**
+ * 当客户端主动连入 /relay/data 端点时，将其 socket 与对应的 pending channel 匹配
+ * @param {string} token  - 客户端 token（用于定位 client entry）
+ * @param {string} connId - NEW_CONN 消息中下发的连接 ID
+ * @param {net.Socket} socket - 数据通道套接字（已剥离 HTTP 头）
+ * @returns {boolean} 是否匹配成功
+ */
+function resolveDataChannel(token, connId, socket) {
+  const client = relayClients.get(token);
+  if (!client) {
+    socket.destroy();
+    return false;
+  }
+  const cb = client.pendingChannels && client.pendingChannels.get(connId);
+  if (!cb) {
+    socket.destroy();
+    return false;
+  }
+  client.pendingChannels.delete(connId);
+  cb(socket);
+  return true;
 }
 
 /**
@@ -446,6 +481,7 @@ module.exports = {
   unregisterClient,
   sendControl,
   waitForDataChannel,
+  resolveDataChannel,
   // 状态
   getRelayStatus,
   adminGetAllRules,

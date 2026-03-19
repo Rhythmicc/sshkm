@@ -769,21 +769,6 @@ app.get('/relay/connect', (req, res) => {
         relayManager.sendControl(socket, { type: 'PONG', ts: Date.now() });
       }
 
-      // 客户端告知数据通道就绪（DATA_CHAN: { connId, dataPort }）
-      if (msg.type === 'DATA_CHAN' && msg.connId && clientEntry.pendingChannels) {
-        const resolve = clientEntry.pendingChannels.get(msg.connId);
-        if (resolve) {
-          clientEntry.pendingChannels.delete(msg.connId);
-          // 客户端在 dataPort 上监听，我们向其发起连接
-          const dataConn = net.createConnection(msg.dataPort, '127.0.0.1');
-          dataConn.once('connect', () => resolve(dataConn));
-          dataConn.once('error', () => {
-            const r = clientEntry.pendingChannels.get(msg.connId);
-            if (r) r(null);
-          });
-        }
-      }
-
       // UDP 回包（UDP_REPLY: { port, to: {address, port}, data: base64 }）
       if (msg.type === 'UDP_REPLY' && msg.port && msg.to && msg.data) {
         const key = `${msg.to.address}:${msg.to.port}`;
@@ -792,6 +777,38 @@ app.get('/relay/connect', (req, res) => {
       }
     }
   });
+});
+
+/**
+ * 数据通道端点（客户端收到 NEW_CONN 后主动连入此处）
+ * GET /relay/data?connId=xxx&token=yyy
+ *
+ * HTTP 头部返回后 socket 立即转为原始 TCP 管道
+ */
+app.get('/relay/data', async (req, res) => {
+  const { connId, token } = req.query;
+
+  if (!connId || !token) {
+    return res.status(400).send('missing connId or token');
+  }
+
+  // 先回应 200，后续这个 socket 就是原始管道
+  res.writeHead(200, {
+    'Content-Type': 'application/octet-stream',
+    'Transfer-Encoding': 'chunked',
+    'Connection': 'keep-alive',
+    'X-Relay': 'data-channel',
+  });
+  res.flushHeaders();
+
+  const socket = req.socket;
+  socket.setTimeout(0);
+
+  // 从已连接的客户端中匹配 token
+  const ok = relayManager.resolveDataChannel(token, connId, socket);
+  if (!ok) {
+    socket.destroy();
+  }
 });
 
 // ==================== 超管：relay 状态 ====================
