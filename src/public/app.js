@@ -6,6 +6,9 @@ let tunnelPollTimer = null; // 轮询定时器
 let tunnelPortRange = { min: 20000, max: 29999 }; // 端口分配范围，登录后从服务器同步
 let tunnelSshUser = ''; // 跳板机 SSH 用户名，从服务器同步
 
+// 超管状态
+let adminSessionToken = null;
+
 // 初始化
 document.addEventListener('DOMContentLoaded', async () => {
   // 获取浏览器指纹
@@ -56,6 +59,24 @@ function setupEventListeners() {
   
   // 退出登录
   document.getElementById('logout-btn').addEventListener('click', logout);
+
+  // 超管入口
+  document.getElementById('admin-entry-btn').addEventListener('click', () => {
+    document.getElementById('login-section').style.display = 'none';
+    document.getElementById('admin-login-section').style.display = 'block';
+    document.getElementById('admin-token-input').focus();
+  });
+  document.getElementById('admin-back-btn').addEventListener('click', () => {
+    document.getElementById('admin-login-section').style.display = 'none';
+    document.getElementById('login-section').style.display = 'block';
+    hideMessage('admin-auth-error');
+  });
+  document.getElementById('admin-verify-btn').addEventListener('click', adminLogin);
+  document.getElementById('admin-token-input').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') adminLogin();
+  });
+  document.getElementById('admin-logout-btn').addEventListener('click', adminLogout);
+  document.getElementById('admin-refresh-btn').addEventListener('click', loadAdminKeys);
 }
 
 /**
@@ -685,4 +706,165 @@ function formatDate(dateString) {
     hour: '2-digit',
     minute: '2-digit'
   });
+}
+
+// ==================== 超管功能 ====================
+
+/**
+ * 超管登录
+ */
+async function adminLogin() {
+  const tokenInput = document.getElementById('admin-token-input');
+  const token = tokenInput.value.trim();
+
+  if (!token) {
+    showError('admin-auth-error', '请输入管理员令牌');
+    return;
+  }
+
+  try {
+    const response = await fetch('/api/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token })
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.success) {
+      adminSessionToken = data.sessionToken;
+      tokenInput.value = '';
+      showAdminPage();
+    } else {
+      showError('admin-auth-error', data.error || '令牌错误');
+      tokenInput.value = '';
+    }
+  } catch (error) {
+    console.error('超管登录失败:', error);
+    showError('admin-auth-error', '登录失败，请重试');
+  }
+}
+
+/**
+ * 显示超管仪表板
+ */
+function showAdminPage() {
+  document.getElementById('auth-page').style.display = 'none';
+  document.getElementById('admin-page').style.display = 'block';
+  loadAdminKeys();
+}
+
+/**
+ * 退出超管
+ */
+function adminLogout() {
+  adminSessionToken = null;
+  document.getElementById('admin-page').style.display = 'none';
+  document.getElementById('auth-page').style.display = 'block';
+  document.getElementById('admin-login-section').style.display = 'none';
+  document.getElementById('login-section').style.display = 'block';
+  document.getElementById('admin-keys-list').innerHTML = '';
+  document.getElementById('admin-stats').innerHTML = '';
+}
+
+/**
+ * 加载所有公钥（超管）
+ */
+async function loadAdminKeys() {
+  const listEl = document.getElementById('admin-keys-list');
+  const statsEl = document.getElementById('admin-stats');
+  listEl.innerHTML = '<div class="loading"><div class="spinner"></div><p>加载中...</p></div>';
+
+  try {
+    const response = await fetch('/api/admin/all-keys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionToken: adminSessionToken })
+    });
+
+    if (response.status === 401) {
+      adminLogout();
+      return;
+    }
+
+    const data = await response.json();
+    if (!response.ok) {
+      listEl.innerHTML = `<div class="error-message show">${escapeHtml(data.error || '加载失败')}</div>`;
+      return;
+    }
+
+    const keys = data.keys || [];
+    const totalKeys = keys.length;
+    const keysWithTunnel = keys.filter(k => k.tunnel_port != null).length;
+    const activeTunnels = keys.filter(k => k.tunnel_active).length;
+    const uniqueUsers = new Set(keys.map(k => k.user_id)).size;
+
+    statsEl.innerHTML = `
+      <div class="admin-stat-grid">
+        <div class="admin-stat"><span class="stat-num">${uniqueUsers}</span><span class="stat-label">用户数</span></div>
+        <div class="admin-stat"><span class="stat-num">${totalKeys}</span><span class="stat-label">公钥总数</span></div>
+        <div class="admin-stat"><span class="stat-num">${keysWithTunnel}</span><span class="stat-label">已分配隧道</span></div>
+        <div class="admin-stat"><span class="stat-num admin-stat-active">${activeTunnels}</span><span class="stat-label">活跃隧道</span></div>
+      </div>
+    `;
+
+    if (keys.length === 0) {
+      listEl.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state-icon">🔑</div>
+          <p>暂无任何公钥数据</p>
+        </div>
+      `;
+      return;
+    }
+
+    // 按 user_id 分组
+    const groups = {};
+    for (const k of keys) {
+      if (!groups[k.user_id]) {
+        groups[k.user_id] = { fingerprint: k.user_fingerprint, keys: [] };
+      }
+      groups[k.user_id].keys.push(k);
+    }
+
+    listEl.innerHTML = Object.entries(groups).map(([userId, group]) => `
+      <div class="admin-user-group">
+        <div class="admin-user-header">
+          <span class="admin-user-label">👤 用户 #${userId}</span>
+          <span class="admin-user-fp" title="${escapeHtml(group.fingerprint)}">指纹: ${escapeHtml(group.fingerprint.slice(0, 12))}…</span>
+          <span class="admin-user-count">${group.keys.length} 个公钥</span>
+        </div>
+        ${group.keys.map(k => renderAdminKeyItem(k)).join('')}
+      </div>
+    `).join('');
+
+  } catch (error) {
+    console.error('加载超管数据失败:', error);
+    listEl.innerHTML = '<div class="error-message show">加载失败，请刷新重试</div>';
+  }
+}
+
+/**
+ * 渲染超管视图中的单个公钥条目
+ */
+function renderAdminKeyItem(key) {
+  const hasTunnel = key.tunnel_port != null;
+  const tunnelBadge = hasTunnel
+    ? `<span class="tunnel-status ${key.tunnel_active ? 'active' : 'inactive'} badge-inline">
+         <span class="status-dot"></span>${key.tunnel_active ? '活跃' : '关闭'} :${key.tunnel_port}
+       </span>`
+    : `<span class="tunnel-status inactive badge-inline"><span class="status-dot"></span>无隧道</span>`;
+
+  return `
+    <div class="key-item admin-key-item">
+      <div class="key-header">
+        <div>
+          <div class="key-comment">${escapeHtml(key.comment || '无备注')}</div>
+          <div class="key-date">添加时间: ${formatDate(key.created_at)}</div>
+        </div>
+        ${tunnelBadge}
+      </div>
+      <div class="key-content">${escapeHtml(key.public_key)}</div>
+    </div>
+  `;
 }

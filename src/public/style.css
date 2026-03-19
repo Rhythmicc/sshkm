@@ -692,3 +692,164 @@ code {
     min-width: 120px;
   }
 }
+
+/* ==================== 超管入口样式 ==================== */
+
+.admin-entry {
+  text-align: center;
+  margin-top: 20px;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 4px 8px;
+  transition: color 0.2s;
+}
+
+.btn-link:hover {
+  color: #667eea;
+}
+
+.btn-admin {
+  width: 100%;
+  background: linear-gradient(135deg, #2d3748 0%, #4a5568 100%);
+  color: white;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
+  display: inline-block;
+  margin-bottom: 0;
+}
+
+.btn-admin:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+}
+
+.admin-header {
+  background: linear-gradient(135deg, #2d3748 0%, #4a5568 100%) !important;
+}
+
+.admin-header h1 {
+  color: white !important;
+}
+
+.header-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* 超管统计卡片 */
+.admin-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.admin-stat {
+  background: #f8f9fa;
+  border-radius: 10px;
+  padding: 16px 12px;
+  text-align: center;
+  border: 2px solid #e9ecef;
+}
+
+.stat-num {
+  display: block;
+  font-size: 28px;
+  font-weight: 700;
+  color: #2d3748;
+  line-height: 1.1;
+}
+
+.admin-stat-active {
+  color: #28a745 !important;
+}
+
+.stat-label {
+  display: block;
+  font-size: 12px;
+  color: #6c757d;
+  margin-top: 4px;
+}
+
+/* 超管用户分组 */
+.admin-user-group {
+  margin-bottom: 24px;
+  border: 2px solid #e9ecef;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.admin-user-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #f1f3f5;
+  padding: 10px 16px;
+  border-bottom: 1px solid #e9ecef;
+  flex-wrap: wrap;
+}
+
+.admin-user-label {
+  font-weight: 700;
+  color: #2d3748;
+  font-size: 14px;
+}
+
+.admin-user-fp {
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  color: #6c757d;
+  flex: 1;
+}
+
+.admin-user-count {
+  font-size: 12px;
+  color: #495057;
+  background: #dee2e6;
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+/* 超管公钥卡片 */
+.admin-key-item {
+  margin: 12px !important;
+  border-radius: 8px !important;
+}
+
+.badge-inline {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+@media (max-width: 600px) {
+  .admin-stat-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .admin-user-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  .header-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}

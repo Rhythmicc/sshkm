@@ -14,7 +14,8 @@ module.exports = {
       TUNNEL_PORT_MIN: '20000',
       TUNNEL_PORT_MAX: '29999',
       // 隧道状态轮询间隔（毫秒），同步前端 app.js 的 10000ms
-      TUNNEL_POLL_INTERVAL: '10000'
+      TUNNEL_POLL_INTERVAL: '10000',
+      ADMIN_TOKEN: ''
     },
 
     name: 'ssh-key-manager',

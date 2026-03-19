@@ -49,6 +49,12 @@ module.exports = {
     pollIntervalMs: parseInt(process.env.TUNNEL_POLL_INTERVAL_MS || '10000', 10),
   },
 
+  // 超管配置
+  admin: {
+    // 超管访问令牌，从环境变量读取（未设置则禁用超管入口）
+    token: process.env.ADMIN_TOKEN || '',
+  },
+
   // 日志配置
   logging: {
     // 是否启用详细日志
