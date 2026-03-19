@@ -222,7 +222,7 @@ function getUserKeys(fingerprint) {
       }
 
       db.all(
-        `SELECT sk.id, sk.public_key, sk.comment, sk.created_at, sk.tunnel_port
+        `SELECT sk.id, sk.public_key, sk.comment, sk.created_at, sk.tunnel_port, sk.is_public
          FROM ssh_keys sk 
          WHERE sk.user_id = ? 
          ORDER BY sk.created_at DESC`,

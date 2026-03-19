@@ -489,6 +489,77 @@ app.post('/api/tunnel/status', async (req, res) => {
   }
 });
 
+/**
+ * 设置隔道公开状态（普通用户接口）
+ */
+app.post('/api/keys/set-public', async (req, res) => {
+  const { fingerprint, keyId, isPublic } = req.body;
+
+  if (!fingerprint || keyId == null || isPublic == null) {
+    return res.status(400).json({ error: '缺少必要参数' });
+  }
+
+  try {
+    const userId = await keyManager.getActualUserId(fingerprint);
+    if (!userId) return res.status(401).json({ error: '用户不存在' });
+
+    db.run(
+      'UPDATE ssh_keys SET is_public = ? WHERE id = ? AND user_id = ? AND tunnel_port IS NOT NULL',
+      [isPublic ? 1 : 0, keyId, userId],
+      function(err) {
+        if (err) return res.status(500).json({ error: '数据库错误' });
+        if (this.changes === 0) return res.status(400).json({ error: '公钥不存在、无权操作或未分配隔道端口' });
+        res.json({ success: true });
+      }
+    );
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: '操作失败' });
+  }
+});
+
+/**
+ * 获取所有公开隔道（需登录用户可访问）
+ */
+app.post('/api/tunnels/public', async (req, res) => {
+  const { fingerprint } = req.body;
+
+  if (!fingerprint) {
+    return res.status(400).json({ error: '缺少浏览器指纹' });
+  }
+
+  try {
+    const userId = await keyManager.getActualUserId(fingerprint);
+    if (!userId) return res.status(401).json({ error: '请先登录' });
+
+    db.all(
+      `SELECT k.id, k.user_id, k.comment, k.tunnel_port, k.created_at,
+              u.username, u.fingerprint AS user_fingerprint
+       FROM ssh_keys k
+       JOIN users u ON k.user_id = u.id
+       WHERE k.is_public = 1 AND k.tunnel_port IS NOT NULL
+       ORDER BY k.user_id, k.created_at DESC`,
+      [],
+      async (err, rows) => {
+        if (err) return res.status(500).json({ error: '数据库错误' });
+        try {
+          const listeningPorts = await keyManager.getActiveTunnelPorts();
+          const result = rows.map(r => ({
+            ...r,
+            tunnel_active: listeningPorts.has(r.tunnel_port)
+          }));
+          res.json({ tunnels: result });
+        } catch (e) {
+          res.json({ tunnels: rows.map(r => ({ ...r, tunnel_active: false })) });
+        }
+      }
+    );
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: '获取失败' });
+  }
+});
+
 // ==================== 超管 API 路由 ====================
 
 /**
@@ -541,7 +612,8 @@ app.post('/api/admin/all-keys', requireAdminSession, async (req, res) => {
     const keys = await new Promise((resolve, reject) => {
       db.all(
         `SELECT k.id, k.user_id, k.fingerprint, k.public_key, k.comment,
-                k.created_at, k.tunnel_port, u.fingerprint AS user_fingerprint
+                k.created_at, k.tunnel_port, k.is_public,
+                u.fingerprint AS user_fingerprint, u.username
          FROM ssh_keys k
          JOIN users u ON k.user_id = u.id
          ORDER BY k.user_id, k.created_at DESC`,
@@ -566,6 +638,53 @@ app.post('/api/admin/all-keys', requireAdminSession, async (req, res) => {
     console.error(error);
     res.status(500).json({ error: '获取数据失败' });
   }
+});
+
+/**
+ * 为用户设置可读用户名（超管接口）
+ */
+app.post('/api/admin/rename-user', requireAdminSession, (req, res) => {
+  const { userId, username } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ error: '缺少必要参数' });
+  }
+
+  const trimmed = typeof username === 'string' ? username.trim().slice(0, 50) : '';
+
+  db.run(
+    'UPDATE users SET username = ? WHERE id = ?',
+    [trimmed || null, userId],
+    function(err) {
+      if (err) return res.status(500).json({ error: '数据库错误' });
+      if (this.changes === 0) return res.status(404).json({ error: '用户不存在' });
+      res.json({ success: true });
+    }
+  );
+});
+
+/**
+ * 删除指定公钥（超管接口）
+ */
+app.post('/api/admin/delete-key', requireAdminSession, async (req, res) => {
+  const { keyId } = req.body;
+
+  if (!keyId) {
+    return res.status(400).json({ error: '缺少必要参数' });
+  }
+
+  db.run('DELETE FROM ssh_keys WHERE id = ?', [keyId], async function(err) {
+    if (err) return res.status(500).json({ error: '数据库错误' });
+    if (this.changes === 0) return res.status(404).json({ error: '公钥不存在' });
+
+    try {
+      await keyManager.syncAuthorizedKeys();
+      res.json({ success: true });
+    } catch (e) {
+      console.error('同步 authorized_keys 失败:', e);
+      res.status(500).json({ error: '公钥已删除，但同步文件失败' });
+    }
+  });
 });
 
 // ==================== 启动服务器 ====================

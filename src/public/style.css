@@ -853,3 +853,70 @@ code {
     gap: 8px;
   }
 }
+
+/* ==================== 超管重命名行 ==================== */
+
+.admin-rename-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  width: 100%;
+}
+
+.admin-rename-input {
+  flex: 1;
+  min-width: 140px;
+  max-width: 260px;
+  padding: 5px 10px;
+  border: 2px solid #dee2e6;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  margin-bottom: 0;
+  transition: border-color 0.2s;
+}
+
+.admin-rename-input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+/* ==================== 隧道公开切换按钮 ==================== */
+
+.btn-public {
+  background: #6c757d;
+  color: white;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.btn-public:hover {
+  background: #5a6268;
+}
+
+.btn-public-active {
+  background: #20c997;
+  color: white;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.btn-public-active:hover {
+  background: #17a589;
+}
+
+/* ==================== 公开隧道列表 ==================== */
+
+.public-tunnel-item {
+  border-color: #20c99730 !important;
+}
+
+.public-tunnel-item:hover {
+  border-color: #20c997 !important;
+}
+
+.public-owner {
+  color: #495057;
+  font-weight: 600;
+}

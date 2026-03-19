@@ -57,6 +57,9 @@ function setupEventListeners() {
     loadTunnelStatus(true);
   });
   
+  // 刷新公开隧道列表
+  document.getElementById('refresh-public-tunnels-btn').addEventListener('click', loadPublicTunnels);
+  
   // 退出登录
   document.getElementById('logout-btn').addEventListener('click', logout);
 
@@ -149,6 +152,7 @@ function showManagePage() {
   document.getElementById('auth-page').style.display = 'none';
   document.getElementById('manage-page').style.display = 'block';
   loadKeys();
+  loadPublicTunnels();
   // 启动隧道状态轮询（10 秒一次）
   startTunnelPolling();
 }
@@ -206,6 +210,9 @@ function renderKeyItem(key) {
         <div class="tunnel-actions">
           <button class="btn btn-copy" onclick="copyTunnelCmd(${key.tunnel_port})" title="复制隧道命令">&#128203; 复制命令</button>
           <button class="btn btn-guide" onclick="showTunnelGuide(${key.tunnel_port}, '${escapeJs(key.comment || '')}')">📖 配置指南</button>
+          <button class="btn ${key.is_public ? 'btn-public-active' : 'btn-public'}" onclick="toggleTunnelPublic(${key.id}, ${key.is_public ? 0 : 1})" title="${key.is_public ? '取消公开此隧道' : '将此隧道公开给其他用户'}">
+            ${key.is_public ? '🌐 已公开' : '🔒 设为公开'}
+          </button>
           <button class="btn btn-release" onclick="releasePort(${key.id})">释放端口</button>
         </div>
       </div>
@@ -822,7 +829,7 @@ async function loadAdminKeys() {
     const groups = {};
     for (const k of keys) {
       if (!groups[k.user_id]) {
-        groups[k.user_id] = { fingerprint: k.user_fingerprint, keys: [] };
+        groups[k.user_id] = { fingerprint: k.user_fingerprint, username: k.username || '', keys: [] };
       }
       groups[k.user_id].keys.push(k);
     }
@@ -830,9 +837,15 @@ async function loadAdminKeys() {
     listEl.innerHTML = Object.entries(groups).map(([userId, group]) => `
       <div class="admin-user-group">
         <div class="admin-user-header">
-          <span class="admin-user-label">👤 用户 #${userId}</span>
+          <span class="admin-user-label" id="admin-user-label-${userId}">👤 用户 #${userId}${group.username ? ' — ' + escapeHtml(group.username) : ''}</span>
           <span class="admin-user-fp" title="${escapeHtml(group.fingerprint)}">指纹: ${escapeHtml(group.fingerprint.slice(0, 12))}…</span>
           <span class="admin-user-count">${group.keys.length} 个公钥</span>
+          <div class="admin-rename-row">
+            <input type="text" class="admin-rename-input" id="rename-input-${userId}"
+              placeholder="设置用户名（最多50字符）" maxlength="50"
+              value="${escapeHtml(group.username)}">
+            <button class="btn btn-sm btn-secondary" onclick="adminRenameUser(${userId})">重命名</button>
+          </div>
         </div>
         ${group.keys.map(k => renderAdminKeyItem(k)).join('')}
       </div>
@@ -851,7 +864,7 @@ function renderAdminKeyItem(key) {
   const hasTunnel = key.tunnel_port != null;
   const tunnelBadge = hasTunnel
     ? `<span class="tunnel-status ${key.tunnel_active ? 'active' : 'inactive'} badge-inline">
-         <span class="status-dot"></span>${key.tunnel_active ? '活跃' : '关闭'} :${key.tunnel_port}
+         <span class="status-dot"></span>${key.tunnel_active ? '活跃' : '关闭'} :${key.tunnel_port}${key.is_public ? ' 🌐' : ''}
        </span>`
     : `<span class="tunnel-status inactive badge-inline"><span class="status-dot"></span>无隧道</span>`;
 
@@ -862,9 +875,169 @@ function renderAdminKeyItem(key) {
           <div class="key-comment">${escapeHtml(key.comment || '无备注')}</div>
           <div class="key-date">添加时间: ${formatDate(key.created_at)}</div>
         </div>
-        ${tunnelBadge}
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          ${tunnelBadge}
+          <button class="btn btn-sm btn-danger" onclick="adminDeleteKey(${key.id})">删除</button>
+        </div>
       </div>
       <div class="key-content">${escapeHtml(key.public_key)}</div>
     </div>
   `;
+}
+
+/**
+ * 超管重命名用户
+ */
+async function adminRenameUser(userId) {
+  const input = document.getElementById(`rename-input-${userId}`);
+  if (!input) return;
+  const username = input.value.trim();
+
+  try {
+    const response = await fetch('/api/admin/rename-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionToken: adminSessionToken, userId, username })
+    });
+    const data = await response.json();
+    if (response.ok && data.success) {
+      const label = document.getElementById(`admin-user-label-${userId}`);
+      if (label) {
+        label.textContent = `👤 用户 #${userId}${username ? ' — ' + username : ''}`;
+      }
+      alert(`用户 #${userId} 已${username ? '重命名为「' + username + '」' : '清除用户名'}`);
+    } else {
+      if (response.status === 401) { adminLogout(); return; }
+      alert(data.error || '重命名失败');
+    }
+  } catch (error) {
+    console.error('重命名失败:', error);
+    alert('重命名失败，请重试');
+  }
+}
+
+/**
+ * 超管删除公钥
+ */
+async function adminDeleteKey(keyId) {
+  if (!confirm('确定要删除这个公钥吗？此操作不可撤销。')) return;
+
+  try {
+    const response = await fetch('/api/admin/delete-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionToken: adminSessionToken, keyId })
+    });
+    const data = await response.json();
+    if (response.ok && data.success) {
+      loadAdminKeys();
+    } else {
+      if (response.status === 401) { adminLogout(); return; }
+      alert(data.error || '删除失败');
+    }
+  } catch (error) {
+    console.error('删除公钥失败:', error);
+    alert('删除失败，请重试');
+  }
+}
+
+// ==================== 隧道公开功能 ====================
+
+/**
+ * 切换隧道公开/私有状态
+ */
+async function toggleTunnelPublic(keyId, isPublic) {
+  try {
+    const response = await fetch('/api/keys/set-public', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fingerprint: visitorId, keyId, isPublic })
+    });
+    const data = await response.json();
+    if (response.ok && data.success) {
+      loadKeys();
+      loadPublicTunnels();
+      if (isPublic) {
+        showSuccess('add-success', '隧道已公开，其他用户现在可以看到并使用此隧道');
+      } else {
+        showSuccess('add-success', '隧道已设为私有');
+      }
+    } else {
+      alert(data.error || '操作失败');
+    }
+  } catch (error) {
+    console.error('设置公开状态失败:', error);
+    alert('操作失败，请重试');
+  }
+}
+
+/**
+ * 加载公开隧道列表
+ */
+async function loadPublicTunnels() {
+  const el = document.getElementById('public-tunnels-list');
+  if (!el) return;
+
+  try {
+    const response = await fetch('/api/tunnels/public', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fingerprint: visitorId })
+    });
+    const data = await response.json();
+    if (!response.ok) return;
+
+    const tunnels = data.tunnels || [];
+    if (tunnels.length === 0) {
+      el.innerHTML = '<p class="hint">暂无其他用户公开的隧道</p>';
+      return;
+    }
+    el.innerHTML = tunnels.map(renderPublicTunnelItem).join('');
+  } catch (error) {
+    console.error('加载公开隧道失败:', error);
+  }
+}
+
+/**
+ * 渲染单个公开隧道条目
+ */
+function renderPublicTunnelItem(tunnel) {
+  const displayName = tunnel.username || `用户 #${tunnel.user_id}`;
+  const isActive = tunnel.tunnel_active;
+
+  return `
+    <div class="key-item public-tunnel-item">
+      <div class="key-header">
+        <div>
+          <div class="key-comment">${escapeHtml(tunnel.comment || '无备注')}</div>
+          <div class="key-date">
+            <span class="public-owner">👤 ${escapeHtml(displayName)}</span>
+            · 端口: <strong>${tunnel.tunnel_port}</strong>
+            · 添加时间: ${formatDate(tunnel.created_at)}
+          </div>
+        </div>
+        <span class="tunnel-status ${isActive ? 'active' : 'inactive'} badge-inline">
+          <span class="status-dot"></span>${isActive ? '活跃' : '离线'}
+        </span>
+      </div>
+      <div class="tunnel-actions" style="margin-top:8px;">
+        <button class="btn btn-copy" onclick="copyPublicTunnelCmd(${tunnel.tunnel_port})">&#128203; 复制连接命令</button>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * 复制通过公开隧道连接的命令
+ */
+function copyPublicTunnelCmd(port) {
+  const serverHost = window.location.hostname;
+  const sshUser = tunnelSshUser || 'YOUR_SSH_USER';
+  // 跳板命令：先通过 jump server 连接到目标机器（反向隧道在 jump server 上监听 port）
+  const cmd = `ssh -J ${sshUser}@${serverHost} -p ${port} <对方用户名>@localhost`;
+  navigator.clipboard.writeText(cmd).then(() => {
+    showSuccess('add-success', `命令已复制（请将 <对方用户名> 替换为实际用户名）`);
+  }).catch(() => {
+    prompt('请手动复制以下命令（将 <对方用户名> 替换为实际用户名）：', cmd);
+  });
 }
